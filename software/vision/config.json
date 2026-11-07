@@ -1,0 +1,63 @@
+{
+  "camera": {
+    "stream_url": "http://192.168.4.1:81/stream",
+    "control_url": "http://192.168.4.1/control",
+    "timeout_s": 3.0,
+    "reconnect_min_s": 0.5,
+    "reconnect_max_s": 5.0,
+    "rotate": 0,
+    "controls": {}
+  },
+  "detector": {
+    "min_area_px": 400,
+    "max_area_ratio": 0.6,
+    "min_extent": 0.3,
+    "blur_kernel": 5,
+    "morph_kernel": 5,
+    "center_deadband": 0.12
+  },
+  "colors": {
+    "red": {
+      "h": [
+        170,
+        10
+      ],
+      "s": [
+        120,
+        255
+      ],
+      "v": [
+        70,
+        255
+      ]
+    },
+    "green": {
+      "h": [
+        40,
+        85
+      ],
+      "s": [
+        80,
+        255
+      ],
+      "v": [
+        50,
+        255
+      ]
+    },
+    "blue": {
+      "h": [
+        95,
+        130
+      ],
+      "s": [
+        120,
+        255
+      ],
+      "v": [
+        50,
+        255
+      ]
+    }
+  }
+}

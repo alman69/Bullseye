@@ -10,3 +10,9 @@ __MACOSX/
 *.map
 *.o
 build/
+
+# Python / laptop vision
+__pycache__/
+*.pyc
+.venv/
+software/vision/captures/
