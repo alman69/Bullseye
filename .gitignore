@@ -1,0 +1,12 @@
+# Operating-system and editor files
+.DS_Store
+__MACOSX/
+.vscode/
+
+# Arduino / ESP32 compiled output
+*.hex
+*.ino.bin
+*.elf
+*.map
+*.o
+build/
