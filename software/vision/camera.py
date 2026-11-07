@@ -240,11 +240,13 @@ class CameraStream(_FrameStore):
             self._thread.start()
         return self
 
-    def stop(self) -> None:
+    def stop(self, wait_s: float = 1.0) -> None:
+        """Ask the reader to stop. Waits at most wait_s: the reader is a daemon
+        thread, so a read blocked on a dead connection never delays program exit."""
         self._stop.set()
         self._wake_all()
         if self._thread is not None:
-            self._thread.join(timeout=self.timeout_s + 1.0)
+            self._thread.join(timeout=wait_s)
         self.state = "stopped"
 
     def __enter__(self) -> "CameraStream":

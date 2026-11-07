@@ -246,16 +246,22 @@ Summarize `fps.jsonl` with:
 .venv/bin/python -c "import json,statistics as s;r=[json.loads(l) for l in open('fps.jsonl')];m=[x['metrics'] for x in r if x['detection']];d=[x['detection'] for x in r if x['detection']];print('stream fps',s.median(x['stream_fps'] for x in m),'| processing fps',s.median(x['proc_fps'] for x in m),'| detect ms',s.median(x['processing_ms'] for x in d),'| age ms',s.median(x['age_ms'] for x in m),'| detected',sum(x['detected'] for x in d),'/',len(d))"
 ```
 
-**Results: not yet run on the physical camera.** Fill this in after testing.
+**Results: first physical-camera session, 2026-11-07** (default HSV values, indoor room light, objects
+held by hand, rover stationary). Color detection was accepted by the team after this session.
+Only test 1 and part of tests 2, 7 and 9 were run; the rest are still open.
 
 | # | Result | Notes |
 |---|---|---|
-| 1 | | |
-| 2 | | |
-| 3 | | |
-| 4 | | |
-| 5 | | |
-| 6 | | |
-| 7 | | |
-| 8 | | |
-| 9 | | |
+| 1 | Accepted | **Yellow:** a yellow box was detected and correctly marked CENTER. **Red:** detected, but the target was a red image on a laptop screen, not a physical object (screens emit light, so colors differ), so it still needs a real red rock. |
+| 2 | Partial | Switching between `r` and `y` worked. The red-on-screen frame had 8 red candidates (all real red swatches) and the largest one was chosen. Red and yellow rocks were never in view together. |
+| 3 | Not run | |
+| 4 | Not run | |
+| 5 | Not run | |
+| 6 | Not run | |
+| 7 | Partial | Snapshots showed **stream 15.0–15.9 fps** at 800×600, processing FPS equal to the stream (no skipped frames), **detect 0.9–2.4 ms**, and frame age 2–55 ms. The 60 s headless run and the camera-to-laptop latency were not measured. |
+| 8 | Not run | |
+| 9 | Partial | No deliberate power-off. The stream **stalled twice without being touched** (probably Wi-Fi); each time it was detected after the 3 s timeout and reconnected about 0.5 s later. One `Corrupt JPEG data` warning appeared just before the first stall. |
+
+**Known issue:** an object with dark print on it (the yellow box) can split into two masks. The
+detector then boxes the larger piece, which can turn a centered object into `RIGHT`/`LEFT`. A
+solid-colored rock is less likely to split; check this with the real rocks before changing the code.

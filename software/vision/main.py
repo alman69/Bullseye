@@ -300,7 +300,13 @@ def main(argv=None) -> int:
     except KeyboardInterrupt:
         pass
     finally:
-        source.stop()
+        try:
+            source.stop()
+            if not args.headless:
+                cv2.destroyAllWindows()
+                cv2.waitKey(1)
+        except KeyboardInterrupt:  # second Ctrl+C while shutting down
+            pass
     return 0
 
 

@@ -178,6 +178,15 @@ class CameraStreamTests(unittest.TestCase):
         self.assertEqual(cam.state, "stopped")
 
 
+    def test_stop_is_prompt_when_camera_stalls(self):
+        srv, url = self.start_server([(1, "stall")])
+        cam = CameraStream(url, timeout_s=3.0).start()
+        self.assertIsNotNone(cam.wait_for_frame(-1, timeout=2.0))
+        t0 = time.monotonic()
+        cam.stop()   # the reader is blocked in a read with a 3 s timeout
+        self.assertLess(time.monotonic() - t0, 1.5)
+
+
 class FileSourceTests(unittest.TestCase):
     def test_folder_source(self):
         with tempfile.TemporaryDirectory() as tmp:
