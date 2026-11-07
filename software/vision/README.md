@@ -1,6 +1,6 @@
 # Bullseye laptop vision (Phase 1)
 
-Laptop-side color-target detection for the ELEGOO Smart Robot Car V4.0's
+Laptop-side color-target detection (red, yellow, green, blue) for the ELEGOO Smart Robot Car V4.0's
 ESP32-WROVER camera. It uses Python, OpenCV and NumPy: HSV thresholds, no
 machine learning. It does **not** drive motors, does **not** serve Mission
 Control, and does **not** change or flash any firmware.
@@ -54,7 +54,7 @@ The last command should end with `OK`. Every later command below runs from `soft
 
 | Key | Action |
 |---|---|
-| `r` `g` `b` | select red / green / blue target |
+| `r` `y` `g` `b` | select red / yellow / green / blue target |
 | `c` | toggle the calibration window |
 | `w` | write the current HSV ranges to `config.json` |
 | `s` | save a snapshot to `captures/`: `_raw.jpg`, `_annotated.jpg`, `_result.json` |
@@ -85,15 +85,17 @@ metrics (see §6), and a red **CAMERA RECONNECTING** banner while the stream is 
 
 Lighting changes colors a lot, so calibrate in the actual arena light.
 
-1. `.venv/bin/python main.py --calibrate`, put one rock in view, press its key (`r`/`g`/`b`).
+1. `.venv/bin/python main.py --calibrate`, put one rock in view, press its key (`r`/`y`/`g`/`b`).
 2. **Left-click the rock** in the main window a few times. Note the `HSV at (...)` numbers.
 3. In the **Calibration (mask)** window, move the sliders until **only the rock** stays visible:
    - **H low / H high**: hue band (OpenCV hue is 0–179). For **red**, set H low *greater* than
      H high (e.g. 170 and 10). That means "170..179 plus 0..10", because red sits at both ends
      of the hue scale.
+   - **Yellow** is around H 20–35. Keep yellow's H low **above** red's H high (defaults: red ends at 10,
+     yellow starts at 20) so an orange-ish patch is never counted as both.
    - **S low**: raise it to drop gray/brown cardboard (low saturation).
    - **V low**: raise it to drop dark shadows. Lower it if the rock vanishes in shadow.
-4. Check the other two rocks and the empty arena: they must stay black for this color.
+4. Check the other rocks and the empty arena: they must stay black for this color.
 5. Repeat for each color, then press **`w`**. `config.json` is updated and the terminal prints the saved values.
    Values persist across runs. Commit `config.json` if you want to share them.
 
@@ -210,7 +212,8 @@ see test 7 below.
 ```
 
 These cover:
-- each color, and picking the requested color among red/green/blue
+- each color, picking the requested color among red/yellow/green/blue, and a red + yellow scene
+- red and yellow hue ranges never both match the same color
 - red hue wrap-around
 - largest-candidate rule, small noise, salt noise, a huge region and a thin streak being rejected
 - the empty-frame / lost result and the JSON fields
@@ -227,8 +230,8 @@ Each test below has its own command. Fill in the table and attach snapshots (`s`
 
 | # | Test | Command / procedure | Record |
 |---|---|---|---|
-| 1 | Accuracy per color | `main.py`, each rock alone at ~50 cm, centered, then left and right. Press `r`/`g`/`b`. | DETECTED? direction correct? 1 snapshot per color |
-| 2 | Multiple colors | All 3 rocks in view; cycle `r`/`g`/`b` | correct rock boxed each time? snapshot |
+| 1 | Accuracy per color | `main.py`, each rock alone at ~50 cm, centered, then left and right. Press its key (`r`/`y`/`g`/`b`). | DETECTED? direction correct? 1 snapshot per color |
+| 2 | Multiple colors | All rocks in view; cycle through their keys | correct rock boxed each time? snapshot |
 | 3 | Distance | One rock at 20, 50, 100, 150, 200 cm | max distance still DETECTED; `area` at each |
 | 4 | Lighting | Room lights on / off / one lamp from the side; re-check test 1 (no re-calibration) | which colors fail; snapshot of failures |
 | 5 | False positives | Empty arena, slowly pan the camera by hand | any boxes? snapshot of each false box |

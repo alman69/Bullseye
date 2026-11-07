@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-COLORS = ("red", "green", "blue")
+COLORS = ("red", "yellow", "green", "blue")
 LEFT, CENTER, RIGHT, NONE = "LEFT", "CENTER", "RIGHT", "NONE"
 
 

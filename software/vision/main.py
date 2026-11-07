@@ -4,7 +4,7 @@ The OpenCV windows here are for testing and calibration only. Navigation and
 Mission Control should use camera.CameraStream + detector.ColorDetector directly
 (see README "Using the detector from other code"), or `--headless` JSON output.
 
-Keys (GUI):  r / g / b  select target color      c  toggle calibration window
+Keys (GUI):  r/y/g/b    select target color      c  toggle calibration window
              w          save HSV values to config s  save snapshot (raw, annotated, JSON)
              n          next image (offline folder) q / Esc  quit
              left-click the video to read the HSV value under the cursor (p clears it)
@@ -29,7 +29,8 @@ from detector import COLORS, ColorDetector, Detection, HsvRange
 MAIN_WIN = "Bullseye Vision"
 CAL_WIN = "Calibration (mask)"
 CAPTURE_DIR = Path(__file__).with_name("captures")
-BGR = {"red": (40, 40, 230), "green": (60, 200, 60), "blue": (230, 120, 40)}
+BGR = {"red": (40, 40, 230), "yellow": (0, 220, 255), "green": (60, 200, 60), "blue": (230, 120, 40)}
+COLOR_KEYS = {ord("r"): "red", ord("y"): "yellow", ord("g"): "green", ord("b"): "blue"}
 TRACKBARS = (("H low", 179), ("H high", 179), ("S low", 255), ("S high", 255), ("V low", 255), ("V high", 255))
 
 
@@ -87,7 +88,7 @@ def draw_overlay(frame: np.ndarray, det: Detection, info: dict, deadband: float)
         (px, py), (ph, ps, pv) = info["probe"]
         cv2.drawMarker(img, (px, py), (0, 255, 255), cv2.MARKER_TILTED_CROSS, 14, 2)
         put_text(img, f"HSV at ({px},{py}) = {ph},{ps},{pv}", (10, h - 34), 0.5, (0, 255, 255))
-    put_text(img, "r/g/b color  c calibrate  w save HSV  s snapshot  q quit", (10, h - 10), 0.45, (220, 220, 220))
+    put_text(img, "r/y/g/b color  c calibrate  w save HSV  s snapshot  q quit", (10, h - 10), 0.45, (220, 220, 220))
     return img
 
 
@@ -222,8 +223,8 @@ def run_gui(source, detector: ColorDetector, cfg: dict, args) -> None:
         key = cv2.waitKey(1) & 0xFF
         if key in (ord("q"), 27) or window_closed(MAIN_WIN):
             break
-        if key in (ord("r"), ord("g"), ord("b")):
-            color = {ord("r"): "red", ord("g"): "green", ord("b"): "blue"}[key]
+        if key in COLOR_KEYS:
+            color = COLOR_KEYS[key]
             lost_since = time.monotonic()
             if last_frame is not None:  # re-run so the overlay matches the new color immediately
                 last_det = detector.detect(last_frame.image, color, last_frame.frame_id, last_frame.received_wall)

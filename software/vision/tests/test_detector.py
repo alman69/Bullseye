@@ -13,7 +13,7 @@ from config import DEFAULTS, load_config, save_config
 from detector import CENTER, LEFT, NONE, RIGHT, ColorDetector, HsvRange, direction_for
 
 W, H = 640, 480
-BGR = {"red": (0, 0, 255), "green": (0, 200, 0), "blue": (255, 0, 0)}
+BGR = {"red": (0, 0, 255), "yellow": (0, 230, 230), "green": (0, 200, 0), "blue": (255, 0, 0)}
 
 
 def background(gray=110):
@@ -61,6 +61,31 @@ class DetectorTests(unittest.TestCase):
                 self.assertEqual(d.candidates, 1)
                 self.assertAlmostEqual(d.center_x, x, delta=2)
                 self.assertEqual(d.direction, direction)
+
+    def test_red_and_yellow_scene(self):
+        """Current physical setup: only a red and a yellow rock."""
+        img = background()
+        blob(img, (160, 260), 45, BGR["red"])
+        blob(img, (480, 220), 45, BGR["yellow"])
+        for color, (x, direction) in {"red": (160, LEFT), "yellow": (480, RIGHT)}.items():
+            with self.subTest(color=color):
+                d = self.det.detect(img, color)
+                self.assertTrue(d.detected)
+                self.assertEqual(d.candidates, 1)   # the other rock is not a candidate
+                self.assertAlmostEqual(d.center_x, x, delta=2)
+                self.assertEqual(d.direction, direction)
+
+    def test_red_and_yellow_ranges_do_not_overlap(self):
+        for hue in range(0, 180):
+            with self.subTest(hue=hue):
+                img = blob(background(), (320, 240), 40, hsv_color(hue))
+                both = self.det.detect(img, "red").detected and self.det.detect(img, "yellow").detected
+                self.assertFalse(both)
+        for hue in (22, 28, 33):
+            with self.subTest(yellow_hue=hue):
+                img = blob(background(), (320, 240), 40, hsv_color(hue))
+                self.assertTrue(self.det.detect(img, "yellow").detected)
+                self.assertFalse(self.det.detect(img, "red").detected)
 
     def test_red_hue_wraps_around(self):
         self.assertTrue(self.det.ranges["red"].wraps)
@@ -169,7 +194,7 @@ class ConfigTests(unittest.TestCase):
     def test_repo_config_matches_defaults_keys(self):
         cfg = load_config()
         self.assertEqual(set(cfg), set(DEFAULTS))
-        for color in ("red", "green", "blue"):
+        for color in ("red", "yellow", "green", "blue"):
             HsvRange.from_dict(cfg["colors"][color])
 
 
