@@ -93,6 +93,15 @@ afterEach(() => {
 });
 
 describe("nebula lifecycle", () => {
+  it("uses the Bullseye palette in the fallback when WebGL is unavailable", () => {
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(null);
+    const { container } = render(<HalftoneNebula preset="bullseye" />);
+    const fallback = container.querySelector(
+      "[style*='radial-gradient']",
+    ) as HTMLElement;
+    expect(fallback.style.background).toContain("224, 57, 43");
+    expect(fallback.style.background).toContain("6, 16, 36");
+  });
   it("keeps overlay content usable when WebGL is unavailable", () => {
     vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(null);
     const { container } = render(

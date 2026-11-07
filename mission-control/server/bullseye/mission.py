@@ -136,6 +136,10 @@ class MissionControl:
                 self.publish()
 
     async def command(self, session_id: str, kind: str, payload: dict):
+        # A browser latency probe is not a pilot heartbeat. Do not acquire the
+        # mission lock, touch ownership/deadlines, publish, or contact the rover.
+        if kind == "ping":
+            return
         async with self.lock:
             now = time.monotonic()
             if self.pilot and now > self.lease_until:

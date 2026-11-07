@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import replace
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -36,6 +37,34 @@ async def launch_to_review(control):
 
 def review_payload(review):
     return {"review_id": review["id"], "mission_id": review["mission_id"]}
+
+
+async def test_ping_is_non_mutating_for_viewer_and_pilot(control):
+    control.adapter.stop = AsyncMock(wraps=control.adapter.stop)
+    before = control.snapshot()
+    await control.command("viewer", "ping", {})
+    # Frame age varies with time; everything the coordinator owns is unchanged.
+    after = control.snapshot()
+    before.pop("camera")
+    after.pop("camera")
+    assert before == after
+    await control.command("pilot", "claim", {})
+    deadline, events = control.lease_until, list(control.events)
+    await control.command("pilot", "ping", {})
+    await control.command("viewer", "ping", {})
+    assert control.pilot == "pilot"
+    assert control.lease_until == deadline and list(control.events) == events
+    control.adapter.stop.assert_not_awaited()
+
+
+async def test_pings_do_not_prevent_pilot_lease_expiry(control):
+    control.settings = replace(control.settings, lease_seconds=.015)
+    await control.command("pilot", "claim", {})
+    for _ in range(12):
+        await control.command("pilot", "ping", {})
+        await control.command("viewer", "ping", {})
+        await asyncio.sleep(.005)
+    assert control.pilot is None and control.phase == "stopped"
 
 
 async def test_full_mission_rejects_stale_and_duplicate_decisions(control):

@@ -5,6 +5,10 @@ license. The Halftone Nebula component was supplied by the project owner in the
 implementation request; its inclusion does not assert authorship or a new license.
 Other npm dependencies retain their individual licenses in their distributions.
 
+The UB Hacking XV Years 2026 badge was also supplied by the project owner. The
+original image and lettering are preserved; inclusion does not assert authorship,
+transfer ownership, or grant a new license to that event artwork.
+
 ## shadcn/ui
 
 MIT License

@@ -39,7 +39,10 @@ import {
 } from "@/components/ui/sheet";
 import { CameraView } from "@/components/camera-view";
 import { ManualControls } from "@/components/manual-controls";
+import { ConnectionsDrawer } from "@/components/connections-drawer";
+import { MobileTabs, type MobileView } from "@/components/mobile-tabs";
 import { useMission } from "@/hooks/use-mission";
+import { useMobileView } from "@/hooks/use-mobile-view";
 import { PHASE_LABELS, SAMPLE_HEX } from "@/lib/protocol";
 import type { MissionState, Phase, SampleColor } from "@/lib/protocol";
 
@@ -275,6 +278,7 @@ export default function App() {
   const {
     state,
     connected,
+    latency,
     isPilot,
     sessionId,
     act,
@@ -285,6 +289,9 @@ export default function App() {
   } = useMission();
   const [busy, setBusy] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
+  const [mobileView, setMobileView] = useState<MobileView>("mission");
+  const isMobile = useMobileView();
   const activity = useRef<HTMLElement>(null);
   const phase = state?.phase || "idle";
   const target = state?.target || "red";
@@ -296,7 +303,9 @@ export default function App() {
     isPilot &&
     state?.capabilities.manual &&
     ["idle", "completed", "returning"].includes(phase) &&
-    !guideOpen
+    !guideOpen &&
+    !connectionsOpen &&
+    (!isMobile || mobileView === "pilot")
   );
   const run = async (kind: string, payload?: Record<string, unknown>) => {
     setBusy(true);
@@ -311,7 +320,7 @@ export default function App() {
     <>
       <div className="nebula-backdrop" aria-hidden="true">
         <HalftoneNebula
-          preset="crimson"
+          preset="bullseye"
           params={SKY}
           interactive={false}
           maxDpr={1}
@@ -319,16 +328,20 @@ export default function App() {
         />
         <div className="nebula-shade" />
       </div>
-      <div className="app-shell">
+      <div className="app-shell" data-mobile-view={mobileView}>
         <header className="topbar">
           <a
             className="brand"
             href="#main"
             aria-label="Bullseye Mission Control"
           >
-            <span className="brand-mark">
-              <Crosshair size={27} strokeWidth={1.3} />
-            </span>
+            <img
+              className="event-badge brand-badge"
+              src="/assets/ub-hacking-2026.png"
+              width={44}
+              height={44}
+              alt="UB Hacking XV Years 2026 badge"
+            />
             <span>
               BULLSEYE<span className="brand-sub">MISSION CONTROL</span>
             </span>
@@ -348,6 +361,14 @@ export default function App() {
             </button>
           </nav>
           <div className="topbar-actions">
+            <ConnectionsDrawer
+              open={connectionsOpen}
+              onOpenChange={setConnectionsOpen}
+              state={state}
+              connected={connected}
+              latency={latency}
+              onStop={() => void stop()}
+            />
             <Sheet open={guideOpen} onOpenChange={setGuideOpen}>
               <SheetTrigger
                 render={
@@ -367,11 +388,25 @@ export default function App() {
                   <SheetDescription>
                     Everything you need for your next discovery.
                   </SheetDescription>
-                  <Button className="stop-button" aria-label="STOP rover in field guide" onClick={() => void stop()}>
+                  <Button
+                    className="stop-button"
+                    aria-label="STOP rover in field guide"
+                    onClick={() => void stop()}
+                  >
                     <Square size={11} fill="currentColor" /> STOP ROVER
                   </Button>
                 </SheetHeader>
                 <div className="guide-content">
+                  <div className="event-insignia">
+                    <img
+                      className="event-badge"
+                      src="/assets/ub-hacking-2026.png"
+                      width={150}
+                      height={150}
+                      alt="UB Hacking XV Years 2026 event badge"
+                    />
+                    <p>BULLSEYE / BUILT AT UB HACKING</p>
+                  </div>
                   <h3>01 / Take the controls</h3>
                   <p>
                     Anyone with this link can claim the available pilot seat.
@@ -390,15 +425,17 @@ export default function App() {
                   </p>
                   <h3>04 / Bring it home</h3>
                   <p>
-                    Select Return Home. Use the on-screen pad or WASD/arrow keys
-                    to assist the return. Select Mark Home when the rover has
+                    On phones, open the Pilot tab for manual driving. Select
+                    Return Home. Use the on-screen pad or WASD/arrow keys to
+                    assist the return. Select Mark Home when the rover has
                     arrived.
                   </p>
                   <h3>Stopping and reconnecting</h3>
                   <p>
                     Hold to drive; release to stop. STOP latches until the pilot
                     resets it. Reconnecting never resumes motion or reclaims
-                    controls automatically.
+                    controls automatically. Leaving Pilot view or opening a
+                    drawer stops manual input.
                   </p>
                   <div className="guide-notice">
                     <Info size={18} />
@@ -441,6 +478,24 @@ export default function App() {
             </div>
             <MissionClock state={state} />
           </section>
+          {isMobile && (
+            <>
+              <div className="mobile-mission-status" aria-live="polite">
+                <span
+                  className={`status-dot ${phase === "stopped" ? "warn" : ""}`}
+                />
+                <span>{PHASE_LABELS[phase]}</span>
+                <small>
+                  {mobileView === "pilot"
+                    ? `${state?.mode === "hardware" ? "HARDWARE" : "SIMULATION"} · ${connected ? "ONLINE" : "OFFLINE"}`
+                    : connected
+                      ? "LINK CONNECTED"
+                      : "LINK OFFLINE"}
+                </small>
+              </div>
+              <MobileTabs value={mobileView} onChange={setMobileView} />
+            </>
+          )}
           <div className="connection-strip">
             <div>
               <span className={`status-dot ${connected ? "" : "warn"}`} />
@@ -509,13 +564,32 @@ export default function App() {
               </Button>
             </div>
           )}
-          <div className="dashboard-grid">
+          <div
+            className="dashboard-grid"
+            id="dashboard-content"
+            role={isMobile ? "tabpanel" : undefined}
+            aria-labelledby={isMobile ? `tab-${mobileView}` : undefined}
+          >
             <div className="main-column">
               <CameraView
                 state={state}
                 connected={connected}
                 onStop={() => void stop()}
               />
+              {isMobile &&
+                mobileView === "pilot" &&
+                phase === "awaiting_confirmation" && (
+                  <div className="pilot-review-notice">
+                    <Gem size={19} />
+                    <span>A sample is waiting for your decision.</span>
+                    <Button
+                      variant="outline"
+                      onClick={() => setMobileView("mission")}
+                    >
+                      Review sample
+                    </Button>
+                  </div>
+                )}
               <div className="telemetry-strip">
                 <div>
                   <span className="micro">ULTRASONIC RANGE</span>
@@ -523,7 +597,12 @@ export default function App() {
                     {state?.distance_cm != null ? (
                       <>
                         {state.distance_cm}
-                        <small>cm · SIMULATED</small>
+                        <small>
+                          cm ·{" "}
+                          {state.mode === "simulation"
+                            ? "SIMULATED"
+                            : "MEASURED"}
+                        </small>
                       </>
                     ) : (
                       "Unavailable"

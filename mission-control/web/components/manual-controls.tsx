@@ -69,10 +69,16 @@ export function ManualControls({
   useEffect(() => {
     if (!enabled) end();
     const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement;
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        !(event.target instanceof Element)
+      )
+        return;
+      const target = event.target;
       if (
         target.closest(
-          "input,textarea,select,button,[role=slider],[role=dialog],[contenteditable=true]",
+          "input,textarea,select,[role=slider],[role=dialog],[contenteditable=true]",
         )
       )
         return;
@@ -205,7 +211,7 @@ export function ManualControls({
         <p className="manual-note">
           {enabled
             ? "Release to stop. Commands expire after 300 ms."
-            : "Claim controls. Manual drive is available before launch and during return."}
+            : "Manual drive opens before launch and during assisted return. Pilot controls are required."}
         </p>
       </div>
     </section>

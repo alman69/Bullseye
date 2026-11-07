@@ -32,7 +32,12 @@ def test_websocket_pilots_stop_and_video():
             first = one.receive_json()
             second = two.receive_json()
             assert first["session_id"] != second["session_id"]
+            assert command(two, "ping")["status"] == "accepted"
+            assert client.get("/api/state").json()["pilot_id"] is None
             assert command(one, "claim")["status"] == "accepted"
+            pilot = client.get("/api/state").json()["pilot_id"]
+            assert command(two, "ping")["status"] == "accepted"
+            assert client.get("/api/state").json()["pilot_id"] == pilot
             assert command(two, "claim")["status"] == "rejected"
             assert command(two, "start")["status"] == "rejected"
             assert client.post("/api/stop").json()["phase"] == "stopped"

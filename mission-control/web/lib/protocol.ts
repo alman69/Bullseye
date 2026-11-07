@@ -46,9 +46,26 @@ export type MissionState = {
   motion: { linear: number; angular: number };
   distance_cm: number | null;
   last_stop_acknowledged: boolean | null;
+  bench?: {
+    enabled: boolean;
+    status: string;
+    error: string | null;
+    armed: boolean;
+    arm_token: string | null;
+    busy: boolean;
+    direction: string | null;
+    stop_pending: boolean;
+    heartbeats: number;
+    max_duration_ms: number;
+    max_speed: number;
+  };
   events: { id: string; at: string; message: string; level: string }[];
 };
 export type CommandPayload = Record<string, unknown>;
+export type LinkLatency = {
+  status: "offline" | "measuring" | "ready" | "timeout";
+  rttMs: number | null;
+};
 export type SendCommand = (
   type: string,
   payload?: CommandPayload,

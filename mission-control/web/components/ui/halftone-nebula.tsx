@@ -90,6 +90,24 @@ export const NEBULA_DEFAULTS: NebulaParams = {
 };
 
 export const NEBULA_PRESETS: Record<string, Partial<NebulaParams>> = {
+  bullseye: {
+    voidColor: "#061024",
+    hazeColor: "#10223a",
+    duskColor: "#263d54",
+    wineColor: "#364e67",
+    crimsonColor: "#a93628",
+    hotColor: "#e0392b",
+    starColor: "#efe7d4",
+    density: 0.42,
+    haze: 0.55,
+    band: 0.35,
+    stars: 0.65,
+    sparkles: 6,
+    speed: 0.5,
+    vignette: 0.65,
+    planetX: 0.74,
+    planetY: 0.2,
+  },
   crimson: {},
   ultraviolet: {
     hazeColor: "#10183f",
@@ -822,15 +840,14 @@ export default function HalftoneNebula({
         (touch === "draw" ? "touch-none " : "touch-pan-y ") +
         className
       }
-      style={{ height }}
+      style={{ height, backgroundColor: P.voidColor }}
       aria-label="A pixel-art nebula printed in halftone dots"
     >
       {failed ? (
         <div
           className="absolute inset-0"
           style={{
-            background:
-              "radial-gradient(60% 45% at 12% 88%, #ff1f5a 0%, #c01245 22%, #5c0d31 50%, transparent 75%),radial-gradient(45% 30% at 22% 22%, #5c0d31 0%, transparent 70%),radial-gradient(40% 30% at 80% 30%, #3b1646 0%, transparent 70%),#050309",
+            background: `radial-gradient(60% 45% at 12% 88%, ${P.hotColor} 0%, ${P.crimsonColor} 22%, ${P.wineColor} 50%, transparent 75%),radial-gradient(45% 30% at 22% 22%, ${P.wineColor} 0%, transparent 70%),radial-gradient(40% 30% at 80% 30%, ${P.duskColor} 0%, transparent 70%),${P.voidColor}`,
           }}
         />
       ) : (

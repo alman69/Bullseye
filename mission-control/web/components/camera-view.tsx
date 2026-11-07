@@ -123,7 +123,7 @@ export function CameraView({
           aria-label={
             source === "live"
               ? "Live rover camera feed"
-              : "Simulated rover camera feed"
+              : source === "simulation" ? "Simulated rover camera feed" : "Rover camera feed unavailable"
           }
         />
         {!hasFrame && (

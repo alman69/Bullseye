@@ -1,0 +1,615 @@
+/* Event branding and connection readiness, shared across both dashboard views. */
+.event-badge {
+  display: block;
+  border-radius: 50%;
+  clip-path: circle(50%);
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.brand-badge {
+  width: 44px;
+  height: 44px;
+}
+.brand-sub {
+  color: #b8bdc5;
+}
+.mode-badge,
+.camera-source {
+  color: var(--brand-cream);
+}
+.event-insignia {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 13px;
+  padding: 18px 0 10px;
+}
+.event-insignia p {
+  font:
+    10px ui-monospace,
+    monospace;
+  letter-spacing: 1px;
+  color: var(--brand-cream);
+  margin: 0;
+}
+.launch-button,
+.primary-button {
+  background: var(--primary);
+  color: var(--brand-cream);
+}
+.launch-button:hover,
+.primary-button:hover {
+  background: #ce372b;
+  color: var(--brand-cream);
+}
+.stop-button {
+  background: #4b1c21;
+  border-color: #e0392b;
+  color: #fff0da;
+  min-height: 44px;
+  min-width: 76px;
+}
+.stop-button:hover {
+  background: #922d25;
+  color: #fff0da;
+}
+.main-nav .nav-active {
+  border-color: var(--brand-red);
+}
+.review-active {
+  border-color: #e0392b80;
+  background: #10213bf5;
+}
+.review-copy .eyebrow,
+.small-indicator.accent {
+  color: #ffc3a7;
+}
+.current .step-icon {
+  color: var(--brand-cream);
+  background: #e0392b26;
+  border-color: #e0392b;
+}
+.review-buttons button,
+.retry-button {
+  min-height: 44px;
+  font-size: 12px;
+}
+.guide-content p,
+.guide-notice p {
+  font-size: 13px;
+}
+.guide-content h3 { color: var(--brand-cream); }
+.guide-content .micro {
+  font-size: 10px;
+}
+.connections-trigger,
+.guide-trigger {
+  min-width: 44px;
+  min-height: 44px;
+  color: var(--brand-cream);
+  font-size: 12px;
+}
+.connections-content {
+  padding: 0 24px 24px;
+}
+.connections-sheet [data-slot="sheet-header"] {
+  padding-top: 32px;
+}
+.connection-mode {
+  border: 1px solid #364e67;
+  border-radius: 8px;
+  padding: 15px;
+  margin-top: 6px;
+  background: #10243b;
+}
+.connection-mode .micro {
+  display: block;
+  color: #c4c6c8;
+  font-size: 10px;
+}
+.connection-mode strong {
+  display: block;
+  margin-top: 7px;
+  color: var(--brand-cream);
+  font-size: 17px;
+}
+.connection-mode p,
+.connection-item p,
+.connection-item small {
+  color: #b8c2d0;
+  font-size: 12px;
+  line-height: 1.8;
+  margin: 7px 0 0;
+}
+.connection-item {
+  display: flex;
+  gap: 12px;
+  padding: 21px 0;
+  border-bottom: 1px solid #364e6780;
+}
+.connection-item > svg {
+  color: #b8c2d0;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.connection-item > div {
+  min-width: 0;
+  flex: 1;
+}
+.connection-item h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--brand-cream);
+}
+.connection-item strong {
+  font-size: 12px;
+  font-weight: 450;
+  color: var(--brand-cream);
+}
+.connection-item .connection-good {
+  color: #add2b6;
+}
+.connection-item .connection-wait {
+  color: #eac4a5;
+}
+.connection-item small {
+  display: block;
+  font-size: 11px;
+}
+.access-item input {
+  display: block;
+  width: 100%;
+  background: #061024;
+  border: 1px solid #364e67;
+  border-radius: 5px;
+  padding: 10px;
+  margin: 12px 0;
+  font:
+    11px ui-monospace,
+    monospace;
+  color: var(--brand-cream);
+}
+.access-item button {
+  min-height: 44px;
+  font-size: 12px;
+}
+.connection-checklist {
+  padding-top: 22px;
+}
+.connection-checklist h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--brand-cream);
+}
+.connection-checklist ol {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: #b8c2d0;
+  font-size: 12px;
+  line-height: 2;
+}
+.mobile-tabs,
+.mobile-mission-status {
+  display: none;
+}
+.guide-sheet [data-slot="sheet-close"] {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+@media (max-width: 1100px) {
+  .topbar-actions {
+    gap: 8px;
+  }
+  .main-nav {
+    gap: 16px;
+    margin-left: 0;
+  }
+}
+@media (max-width: 800px) {
+  .topbar {
+    height: 76px;
+    padding: 0 4%;
+  }
+  .topbar-actions {
+    gap: 3px;
+  }
+  .guide-trigger > span,
+  .connections-trigger > span {
+    display: none;
+  }
+  .brand {
+    font-size: 14px;
+    letter-spacing: 2px;
+    gap: 9px;
+  }
+  .brand-badge {
+    width: 40px;
+    height: 40px;
+  }
+  .brand-sub {
+    font-size: 7px;
+    letter-spacing: 1.7px;
+  }
+  .guide-trigger,
+  .connections-trigger {
+    padding: 0;
+    width: 44px;
+  }
+  main {
+    padding: 18px 4% 0;
+  }
+  .mission-intro {
+    margin-bottom: 10px;
+    align-items: center;
+  }
+  .mission-intro h1,
+  .mission-intro p,
+  .intro-eyebrow > .micro,
+  .intro-divider {
+    display: none;
+  }
+  .intro-eyebrow {
+    margin: 0;
+  }
+  .mode-badge {
+    font-size: 9px;
+    padding: 5px 7px;
+    letter-spacing: 0.7px;
+  }
+  .mission-clock {
+    padding: 0;
+    align-self: auto;
+  }
+  .mission-clock > .micro {
+    display: none;
+  }
+  .mission-clock > div {
+    font-size: 21px;
+    line-height: 1.3;
+  }
+  .clock-plus {
+    font-size: 11px;
+  }
+  .mobile-mission-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    min-height: 30px;
+    margin-bottom: 12px;
+  }
+  .mobile-mission-status small {
+    margin-left: auto;
+    color: #bac4d0;
+    font:
+      8px ui-monospace,
+      monospace;
+    letter-spacing: 0.3px;
+  }
+  .mobile-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    background: #08162beb;
+    border: 1px solid #364e67;
+    border-radius: 8px;
+    padding: 4px;
+    margin-bottom: 14px;
+  }
+  .mobile-tabs button {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    color: #c1c7cf;
+    background: none;
+    font-size: 13px;
+  }
+  .mobile-tabs button[aria-selected="true"] {
+    color: var(--brand-cream);
+    background: #25394e;
+    border-color: #efe7d429;
+  }
+  .connection-strip {
+    display: none;
+  }
+  .dashboard-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .main-column,
+  .side-column {
+    display: contents;
+  }
+  .dashboard-grid > .main-column > *,
+  .dashboard-grid > .side-column > * {
+    width: 100%;
+  }
+  .pilot-strip {
+    order: -1;
+    padding: 10px 12px;
+    min-height: 66px;
+  }
+  .pilot-strip strong {
+    font-size: 12px;
+  }
+  .pilot-strip span:not(.pilot-avatar) {
+    font-size: 10px;
+  }
+  .pilot-strip button {
+    min-height: 44px;
+    min-width: 60px;
+    font-size: 11px;
+  }
+  .camera-panel {
+    order: 0;
+  }
+  .target-panel {
+    order: 1;
+  }
+  .telemetry-strip {
+    order: 2;
+  }
+  .mission-progress {
+    order: 3;
+  }
+  .review-panel {
+    order: 4;
+  }
+  .review-active {
+    order: 1;
+  }
+  .manual-panel {
+    order: 5;
+  }
+  .sample-status {
+    order: 6;
+  }
+  .home-panel {
+    order: 7;
+  }
+  [data-mobile-view="mission"] .manual-panel,
+  [data-mobile-view="mission"] .sample-status,
+  [data-mobile-view="mission"] .home-panel {
+    display: none;
+  }
+  [data-mobile-view="pilot"] .target-panel,
+  [data-mobile-view="pilot"] .telemetry-strip,
+  [data-mobile-view="pilot"] .mission-progress,
+  [data-mobile-view="pilot"] .review-panel,
+  [data-mobile-view="pilot"] .activity-panel {
+    display: none;
+  }
+  [data-mobile-view="pilot"] .manual-panel {
+    order: 2;
+  }
+  [data-mobile-view="pilot"] .camera-stage {
+    max-height: 32svh;
+  }
+  .pilot-review-notice {
+    order: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    border: 1px solid #e0392b88;
+    padding: 12px;
+    border-radius: 7px;
+    background: #10243bf5;
+    font-size: 12px;
+  }
+  .pilot-review-notice button {
+    min-height: 44px;
+    margin-left: auto;
+    font-size: 12px;
+  }
+  .drive-pad {
+    grid-template-columns: repeat(3, 56px);
+    grid-template-rows: repeat(3, 50px);
+    gap: 8px;
+  }
+  .drive-key,
+  .drive-center {
+    min-width: 50px;
+    min-height: 50px;
+  }
+  .manual-body {
+    padding: 18px 22px;
+  }
+  .control-hint {
+    font-size: 12px;
+    margin: 15px 0 20px;
+  }
+  .speed-label {
+    font-size: 13px;
+  }
+  .manual-note {
+    font-size: 12px;
+    margin-top: 14px;
+  }
+  .manual-panel [data-slot="slider"] {
+    padding: 0;
+  }
+  .manual-panel [data-slot="slider-control"] {
+    min-height: 44px;
+  }
+  .manual-panel [data-slot="slider-thumb"] {
+    width: 18px;
+    height: 18px;
+  }
+  .sample-status strong,
+  .home-panel p {
+    font-size: 13px;
+  }
+  .sample-status small {
+    font-size: 11px;
+  }
+  .return-button {
+    min-height: 44px;
+    font-size: 13px;
+  }
+  .panel-heading h2 {
+    font-size: 13px;
+  }
+  .target-body h3 {
+    font-size: 23px;
+  }
+  .target-body > p:not(.launch-note),
+  .launch-note {
+    font-size: 12px;
+  }
+  .launch-button {
+    min-height: 44px;
+    font-size: 13px;
+  }
+  .sample-option strong {
+    font-size: 13px;
+  }
+  .sample-option small {
+    font-size: 10px;
+  }
+  .review-placeholder p,
+  .review-copy > p:not(.eyebrow) {
+    font-size: 12px;
+  }
+  .review-caption {
+    font-size: 10px;
+  }
+  .review-buttons {
+    gap: 10px;
+  }
+  .review-buttons button {
+    flex: 1;
+    min-width: 130px;
+  }
+  .camera-source {
+    font-size: 8px;
+  }
+  .camera-footer {
+    font-size: 9px;
+    flex-wrap: wrap;
+    line-height: 1.6;
+  }
+  .log-row {
+    font-size: 11px;
+  }
+  .log-row time {
+    font-size: 10px;
+  }
+  .stop-banner strong {
+    font-size: 12px;
+  }
+  .stop-banner span {
+    font-size: 11px;
+  }
+  .stop-banner button {
+    min-height: 44px;
+  }
+}
+@media (max-width: 370px) {
+  .brand {
+    font-size: 12px;
+    gap: 6px;
+    letter-spacing: 1.5px;
+  }
+  .brand-badge {
+    width: 34px;
+    height: 34px;
+  }
+  .brand-sub {
+    font-size: 6px;
+    letter-spacing: 1.2px;
+  }
+  .topbar-actions {
+    gap: 0;
+  }
+  .stop-button {
+    min-width: 66px;
+    padding: 0 10px;
+  }
+  .guide-trigger,
+  .connections-trigger {
+    min-width: 44px;
+    width: 44px;
+  }
+  .mobile-mission-status small {
+    font-size: 7px;
+  }
+}
+
+/* Keep the live picture and full direction pad within reach on portrait phones. */
+@media (max-width: 800px) {
+  [data-mobile-view="pilot"] main {
+    padding-top: 10px;
+  }
+  [data-mobile-view="pilot"] .mission-intro {
+    display: none;
+  }
+  [data-mobile-view="pilot"] .mobile-mission-status {
+    margin-bottom: 8px;
+  }
+  [data-mobile-view="pilot"] .mobile-tabs {
+    margin-bottom: 10px;
+  }
+  [data-mobile-view="pilot"] .dashboard-grid {
+    gap: 10px;
+  }
+  [data-mobile-view="pilot"] .pilot-strip {
+    min-height: 56px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+  [data-mobile-view="pilot"] .camera-panel {
+    position: relative;
+  }
+  [data-mobile-view="pilot"] .camera-panel:not(:fullscreen) .panel-heading {
+    min-height: 0;
+    height: 0;
+    padding: 0;
+    border: 0;
+  }
+  [data-mobile-view="pilot"] .camera-panel:not(:fullscreen) .heading-icon,
+  [data-mobile-view="pilot"]
+    .camera-panel:not(:fullscreen)
+    .camera-actions
+    > .micro,
+  [data-mobile-view="pilot"] .camera-panel:not(:fullscreen) .camera-footer {
+    display: none;
+  }
+  [data-mobile-view="pilot"] .camera-panel:not(:fullscreen) .camera-actions {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 3;
+  }
+  [data-mobile-view="pilot"] .camera-actions button {
+    min-width: 44px;
+    min-height: 44px;
+    background: #061024d9;
+    color: var(--brand-cream);
+  }
+  [data-mobile-view="pilot"] .camera-stage {
+    max-height: none;
+  }
+  [data-mobile-view="pilot"] .camera-source {
+    max-width: calc(100% - 65px);
+  }
+  [data-mobile-view="pilot"] .manual-body {
+    padding-top: 12px;
+  }
+  [data-mobile-view="pilot"] .drive-pad {
+    grid-template-rows: repeat(3, 44px);
+  }
+  [data-mobile-view="pilot"] .drive-key,
+  [data-mobile-view="pilot"] .drive-center {
+    min-height: 44px;
+  }
+}

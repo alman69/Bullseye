@@ -1,15 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CommandPayload, MissionState, SendCommand } from "@/lib/protocol";
+import type {
+  CommandPayload,
+  LinkLatency,
+  MissionState,
+  SendCommand,
+} from "@/lib/protocol";
 
 export function socketUrl(path: string) {
   return `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}${path}`;
 }
 
-export function useMission() {
+export function useMission(controlPath = "/ws/control", stopPath = "/api/stop") {
   const [state, setState] = useState<MissionState | null>(null);
   const [connected, setConnected] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [latency, setLatency] = useState<LinkLatency>({
+    status: "offline",
+    rttMs: null,
+  });
   const socket = useRef<WebSocket | null>(null);
   const current = useRef({ state, sessionId });
   current.current = { state, sessionId };
@@ -44,12 +53,45 @@ export function useMission() {
   );
 
   useEffect(() => {
+    if (!connected) {
+      setLatency({ status: "offline", rttMs: null });
+      return;
+    }
+    let disposed = false;
+    let inFlight = false;
+    const probe = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      const started = performance.now();
+      try {
+        await send("ping");
+        if (!disposed)
+          setLatency({
+            status: "ready",
+            rttMs: Math.max(0, Math.round(performance.now() - started)),
+          });
+      } catch {
+        if (!disposed) setLatency({ status: "timeout", rttMs: null });
+      } finally {
+        inFlight = false;
+      }
+    };
+    setLatency({ status: "measuring", rttMs: null });
+    void probe();
+    const timer = setInterval(() => void probe(), 5000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [connected, send]);
+
+  useEffect(() => {
     let disposed = false;
     let reconnect: ReturnType<typeof setTimeout>;
     let attempts = 0;
     const connect = () => {
       if (disposed) return;
-      const ws = new WebSocket(socketUrl("/ws/control"));
+      const ws = new WebSocket(socketUrl(controlPath));
       socket.current = ws;
       ws.onopen = () => {
         if (disposed) return;
@@ -94,7 +136,7 @@ export function useMission() {
       }
       pending.current.clear();
     };
-  }, []);
+  }, [controlPath]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -119,7 +161,7 @@ export function useMission() {
 
   const stop = useCallback(async () => {
     try {
-      const response = await fetch("/api/stop", {
+      const response = await fetch(stopPath, {
         method: "POST",
         signal: AbortSignal.timeout(2500),
       });
@@ -134,11 +176,12 @@ export function useMission() {
         );
       }
     }
-  }, [send]);
+  }, [send, stopPath]);
 
   return {
     state,
     connected,
+    latency,
     sessionId,
     isPilot: !!sessionId && state?.pilot_id === sessionId,
     act,

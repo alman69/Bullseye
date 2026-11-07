@@ -11,4 +11,4 @@ if [[ ! -f ../web/dist/index.html ]]; then
   exit 1
 fi
 if [[ -f .env ]]; then set -- --env-file .env "$@"; fi
-exec .venv/bin/python -m uvicorn bullseye.app:app --host 127.0.0.1 --port 8000 "$@"
+exec .venv/bin/python -m uvicorn bullseye.app:app --host 127.0.0.1 --port "${BULLSEYE_PORT:-8000}" "$@"
