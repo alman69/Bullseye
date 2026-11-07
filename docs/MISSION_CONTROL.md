@@ -2,7 +2,10 @@
 
 A laptop-hosted React/TypeScript dashboard with a FastAPI coordinator, a clearly
 labeled simulator, and a shared camera relay. No existing firmware is changed.
-The hardware adapter intentionally has all motion/mission capabilities disabled.
+The mission dashboard's hardware adapter intentionally has all motion/mission
+capabilities disabled. The separate [real-rover controller](ELEGOO_CONNECTION.md#local-browser-control-demo)
+at `/bench` supports enabled manual control, held WASD, timed button steps, and
+live uncalibrated ultrasonic readings using the original ELEGOO firmware.
 The UB Hacking badge and its navy, cream, steel-blue, and rocket-red palette frame
 the Bullseye identity; the supplied event lettering is preserved.
 
@@ -163,8 +166,9 @@ guarantee. Physical network and rover verification remain a separate milestone.
 ## API and teammate integration contract
 
 All URLs are relative to the same origin. Video uses binary JPEG messages on
-`/ws/video`. There is no OpenCV, autonomous hardware navigation, or real motor
-transport implemented yet; that work belongs behind the adapter boundary.
+`/ws/video`. There is no OpenCV or autonomous hardware navigation yet. The separate
+`/bench` controller implements real manual transport; the mission API below keeps
+using the disabled hardware stub until navigation integration is ready.
 
 `GET /api/state` returns the same state broadcast by `/ws/control`: operating mode,
 phase, target, mission ID/timestamps, capabilities, current review, collection

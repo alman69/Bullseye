@@ -33,6 +33,9 @@ class StreamWriter:
         self.complete = True
         self.closed = False
         self.moved = asyncio.Event()
+        self.distance = 11
+        self.fence_reply = True
+        self.fence_value = "512"
 
     def write(self, data):
         self.sent.append(data)
@@ -44,7 +47,9 @@ class StreamWriter:
         elif command["N"] == 21:
             self.reader.feed(b"{old_99}")
             self.reader.feed(("{" + command["H"] + "_").encode())
-            self.reader.feed(b"11}")
+            self.reader.feed((str(self.distance) + "}").encode())
+        elif command["N"] == 22 and self.fence_reply:
+            self.reader.feed(("{" + command["H"] + "_" + self.fence_value + "}").encode())
         elif command["N"] == 2:
             self.moved.set()
             self.reader.feed(b"{Heartbeat}")
@@ -146,6 +151,73 @@ async def test_failed_preflight_stop_prevents_motion(tcp, monkeypatch):
     assert not any(command["N"] == 2 for command in writer.commands)
 
 
+async def test_held_drive_uses_finite_commands_and_waits_for_cached_read_ack(tcp):
+    bridge, _, writer, _ = tcp
+    await bridge.drive_frame("forward", 40)
+    assert [command["N"] for command in writer.commands][-2:] == [2, 22]
+    assert writer.commands[-2]["T"] == 300 and writer.commands[-2]["D1"] == 3
+    assert writer.commands[-1]["D1"] == 0
+
+
+async def test_missing_drive_ack_stops_without_sending_more_movement(tcp):
+    bridge, _, writer, _ = tcp
+    writer.fence_reply = False
+    with pytest.raises(TimeoutError):
+        await bridge.drive_frame("forward", 40)
+    assert sum(command["N"] == 2 for command in writer.commands) == 1
+    assert writer.commands[-1]["N"] == 100
+
+
+@pytest.mark.parametrize("value", ["ok", "-1", "1024"])
+async def test_malformed_cached_ack_stops_instead_of_continuing(tcp, value):
+    bridge, _, writer, _ = tcp
+    writer.fence_value = value
+    with pytest.raises(ConnectionError):
+        await bridge.drive_frame("forward", 40)
+    assert writer.commands[-1]["N"] == 100
+
+
+async def test_expired_input_waiting_on_sensor_lock_never_sends_late_motion(tcp):
+    bridge, _, writer, _ = tcp
+    await bridge.io_lock.acquire()
+    valid = True
+    job = asyncio.create_task(bridge.drive_frame("forward", 40, valid=lambda: valid))
+    await asyncio.sleep(0)
+    valid = False
+    bridge.io_lock.release()
+    assert await job is False
+    assert not any(command["N"] == 2 for command in writer.commands)
+
+
+async def test_distance_queries_wait_for_motion_transaction_and_cancellation_sends_stop(tcp):
+    bridge, _, writer, _ = tcp
+    writer.fence_reply = False
+    motion = asyncio.create_task(bridge.drive_frame("forward", 40))
+    await writer.moved.wait()
+    distance = asyncio.create_task(bridge.refresh_distance())
+    await asyncio.sleep(.01)
+    assert sum(command["N"] == 21 for command in writer.commands) == 1  # Connection-time read only.
+    motion.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await motion
+    assert await distance is True
+    commands = writer.commands
+    assert [command["N"] for command in commands][-2:] == [100, 21]
+
+
+async def test_live_distance_zero_is_invalid_and_failure_marks_old_value_stale(tcp, monkeypatch):
+    bridge, _, writer, _ = tcp
+    writer.distance = 0
+    assert await bridge.refresh_distance()
+    assert bridge.distance_cm is None and bridge.distance_at > 0
+    settings = Settings(mode="hardware", bench_enabled=True)
+    controller = BenchControl(settings, CameraHub(settings), bridge)
+    assert controller.snapshot()["bench"]["distance_status"] == "invalid"
+    monkeypatch.setattr(bridge, "request", AsyncMock(side_effect=TimeoutError))
+    assert await bridge.refresh_distance() is False
+    assert controller.snapshot()["bench"]["distance_status"] == "stale"
+
+
 class FakeBridge:
     def __init__(self):
         self.status = "disconnected"
@@ -157,6 +229,11 @@ class FakeBridge:
         self.stops = 0
         self.release_pulse = asyncio.Event()
         self.pulse_started = asyncio.Event()
+        self.distance_at = 0
+        self.distance_error = None
+        self.measurements = 0
+        self.frames = []
+        self.frame_started = asyncio.Event()
 
     @property
     def connected(self):
@@ -165,6 +242,7 @@ class FakeBridge:
     async def connect(self):
         self.status = "ready"
         self.last_stop_acknowledged = True
+        self.distance_at = time.monotonic()
 
     async def stop(self):
         self.stops += 1
@@ -181,6 +259,19 @@ class FakeBridge:
 
     async def close(self):
         self.status = "disconnected"
+
+    async def refresh_distance(self):
+        self.measurements += 1
+        self.distance_at = time.monotonic()
+        return True
+
+    async def drive_frame(self, direction, speed, *, valid=lambda: True):
+        if not valid():
+            return False
+        self.frames.append((direction, speed))
+        self.frame_started.set()
+        await asyncio.sleep(0)
+        return True
 
 
 async def settle(control):
@@ -202,26 +293,25 @@ async def arm(bench):
     await bench.command("pilot", "claim", {})
     await bench.command("pilot", "bridge_connect", {})
     await settle(bench)
-    await bench.command("pilot", "bench_arm", {"wheels_raised": True})
+    await bench.command("pilot", "bench_arm", {})
 
 
 def payload(bench, **changes):
     return {"direction": "forward", "speed": 40, "duration_ms": 200, "arm_token": bench.arm_token, **changes}
 
 
-async def test_exclusive_pilot_and_wheels_confirmation_before_arm(bench):
+async def test_exclusive_pilot_and_connected_bridge_before_enable(bench):
     await bench.command("pilot", "claim", {})
     with pytest.raises(CommandError, match="Another pilot"):
         await bench.command("viewer", "claim", {})
     with pytest.raises(CommandError, match="Claim"):
         await bench.command("viewer", "bridge_connect", {})
     with pytest.raises(CommandError, match="Connect"):
-        await bench.command("pilot", "bench_arm", {"wheels_raised": True})
+        await bench.command("pilot", "bench_arm", {})
     await bench.command("pilot", "bridge_connect", {})
     await settle(bench)
-    with pytest.raises(CommandError, match="all four wheels"):
-        await bench.command("pilot", "bench_arm", {"wheels_raised": "true"})
-    assert not bench.armed and bench.bridge.pulses == []
+    await bench.command("pilot", "bench_arm", {})
+    assert bench.armed and bench.bridge.pulses == []
 
 
 async def test_steps_do_not_queue_and_old_token_is_rejected_after_completion(bench):
@@ -249,7 +339,7 @@ async def test_viewer_stop_interrupts_step_and_requires_explicit_rearm(bench):
     await settle(bench)
     with pytest.raises(CommandError):
         await bench.command("pilot", "bench_pulse", old)
-    await bench.command("pilot", "bench_arm", {"wheels_raised": True})
+    await bench.command("pilot", "bench_arm", {})
     with pytest.raises(CommandError, match="outdated"):
         await bench.command("pilot", "bench_pulse", old)
 
@@ -280,6 +370,79 @@ async def test_disconnect_and_hardware_loss_disable_steps_without_auto_reconnect
     assert not bench.armed and bench.stopped
     await bench.disconnect("pilot")
     assert bench.pilot is None
+
+
+def hold_payload(bench, hold_id="hold-1", **changes):
+    return {"direction": "forward", "speed": 40, "hold_id": hold_id, "arm_token": bench.arm_token, **changes}
+
+
+async def test_keyboard_renews_movement_beyond_one_step_then_release_stops(bench):
+    await arm(bench)
+    held = hold_payload(bench)
+    await bench.command("pilot", "hold_start", held)
+    for _ in range(6):
+        await asyncio.sleep(.1)
+        await bench.command("pilot", "hold_update", held)
+    assert len(bench.bridge.frames) >= 4 and bench.armed
+    await bench.command("pilot", "hold_end", held)
+    await settle(bench)
+    count = len(bench.bridge.frames)
+    await asyncio.sleep(.2)
+    assert len(bench.bridge.frames) == count and bench.armed
+    assert bench.hold_id is None and bench.bridge.stops > 0
+
+
+async def test_stale_keyboard_input_stops_and_disables_without_waiting_for_pilot_expiry(bench):
+    await arm(bench)
+    await bench.command("pilot", "hold_start", hold_payload(bench))
+    await asyncio.sleep(.5)
+    assert bench.pilot == "pilot" and not bench.armed and bench.stopped
+    assert bench.operation is None and bench.hold_id is None
+
+
+async def test_old_hold_renewals_and_end_events_cannot_restart_or_cancel_new_hold(bench):
+    await arm(bench)
+    old = hold_payload(bench)
+    await bench.command("pilot", "hold_start", old)
+    await bench.command("pilot", "hold_end", old)
+    await settle(bench)
+    fresh = hold_payload(bench, "hold-2")
+    await bench.command("pilot", "hold_start", fresh)
+    await bench.command("pilot", "hold_update", old)
+    await bench.command("pilot", "hold_end", old)
+    assert bench.hold_id == "hold-2"
+    await bench.command("pilot", "hold_end", fresh)
+    await settle(bench)
+    with pytest.raises(CommandError, match="outdated"):
+        await bench.command("pilot", "hold_start", old)
+
+
+async def test_stop_cancels_hold_before_first_frame_and_delayed_renewal_does_nothing(bench):
+    await arm(bench)
+    held = hold_payload(bench)
+    await bench.command("pilot", "hold_start", held)
+    await bench.stop()
+    await settle(bench)
+    await bench.command("pilot", "hold_update", held)
+    assert not bench.armed and bench.bridge.frames == []
+
+
+async def test_viewer_cannot_renew_keyboard_input(bench):
+    await arm(bench)
+    with pytest.raises(CommandError, match="Claim"):
+        await bench.command("viewer", "hold_update", hold_payload(bench))
+
+
+async def test_idle_telemetry_refreshes_without_claiming_controls(bench):
+    await bench.command("pilot", "claim", {})
+    await bench.command("pilot", "bridge_connect", {})
+    await settle(bench)
+    before = bench.bridge.measurements
+    await asyncio.sleep(.6)
+    assert bench.bridge.measurements > before and not bench.armed
+    snapshot = bench.snapshot()
+    assert snapshot["bench"]["distance_status"] == "live"
+    assert snapshot["bench"]["distance_age_ms"] < 1000
 
 
 @pytest.mark.parametrize("changes", [{"speed": 101}, {"speed": True}, {"duration_ms": 0}, {"duration_ms": 1001}, {"direction": "diagonal"}])

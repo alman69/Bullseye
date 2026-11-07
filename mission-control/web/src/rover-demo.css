@@ -9,10 +9,6 @@
 .bench-title p:last-child { margin: 9px 0 0; color: #b8c2d0; font-size: 13px; }
 .bench-pill { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; background: #182b41; border: 1px solid #364e67; border-radius: 30px; color: #d0c9bb; font: 10px ui-monospace, monospace; white-space: nowrap; }
 .bench-pill.ready { color: #b4dbbb; border-color: #6eac8080; }
-.bench-notice { display: flex; align-items: flex-start; gap: 13px; padding: 15px 18px; border: 1px solid #e0392b55; border-radius: 9px; background: #251c29e8; margin-bottom: 22px; }
-.bench-notice svg { flex-shrink: 0; color: #ffc3a7; margin-top: 3px; }
-.bench-notice p { margin: 0; font-size: 12px; color: #c7c1bb; line-height: 1.8; }
-.bench-notice strong { color: #efe7d4; font-weight: 550; }
 .bench-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(330px, 1fr); gap: 22px; align-items: start; scroll-margin-top: 88px; }
 .bench-left, .bench-right { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .bench-status { display: grid; grid-template-columns: repeat(2, 1fr); }
@@ -28,10 +24,10 @@
 .bench-shell button { min-height: 44px; }
 .bench-connect { width: 100%; margin-top: 20px; background: #182c43; border-color: #364e67; }
 .bench-help { font-size: 11px; color: #b8c2d0; line-height: 1.8; margin: 12px 0; }
-.bench-checkbox { display: flex; align-items: flex-start; gap: 10px; padding: 12px 0; min-height: 44px; cursor: pointer; }
-.bench-checkbox input { width: 19px; height: 19px; margin-top: 1px; accent-color: #b62f25; flex-shrink: 0; }
-.bench-checkbox span { font-size: 12px; line-height: 1.7; }
 .bench-enable { width: 100%; margin-top: 5px; }
+.bench-enable[aria-pressed="true"] { background: #84281f; border-color: #e0392b; }
+.bench-distance.live strong { color: #b5d6bc; }
+.bench-distance.stale strong, .bench-distance.invalid strong { color: #e9bc9c; }
 .bench-pad { display: grid; grid-template-columns: repeat(3, minmax(65px, 1fr)); grid-template-rows: repeat(3, 62px); gap: 8px; max-width: 310px; margin: auto; }
 .bench-pad button { display: flex; flex-direction: column; gap: 4px; background: #1c3047; border: 1px solid #364e67; font-size: 10px; }
 .bench-pad button:not(:disabled):hover { background: #344a60; }
@@ -71,15 +67,10 @@
   .bench-status small { line-height: 1.7; }
   .bench-pad { max-width: 340px; grid-template-rows: repeat(3, 64px); }
   .bench-help { font-size: 12px; }
-  .bench-notice { padding: 12px 14px; }
   .bench-footer { flex-direction: column; gap: 10px; line-height: 1.8; }
   .bench-log-row { gap: 12px; }
   .bench-shell[data-armed="true"] .bench-main { padding-top: 12px; }
   .bench-shell[data-armed="true"] .bench-title { display: none; }
-  .bench-shell[data-armed="true"] .bench-notice { padding: 8px 12px; margin-bottom: 12px; align-items: center; }
-  .bench-shell[data-armed="true"] .bench-notice p { font-size: 0; }
-  .bench-shell[data-armed="true"] .bench-notice strong { font-size: 11px; }
-  .bench-shell[data-armed="true"] .bench-notice svg { width: 16px; height: 16px; margin: 0; }
   .bench-shell[data-armed="true"] .bench-left,
   .bench-shell[data-armed="true"] .bench-right { display: contents; }
   .bench-shell[data-armed="true"] .bench-grid { gap: 12px; }
@@ -87,11 +78,12 @@
   .bench-shell[data-armed="true"] .bench-pilot { order: -1; }
   .bench-shell[data-armed="true"] .bench-pilot .panel-heading,
   .bench-shell[data-armed="true"] .bench-pilot .bench-help,
-  .bench-shell[data-armed="true"] .bench-pilot .bench-checkbox,
-  .bench-shell[data-armed="true"] .bench-pilot .bench-enable,
   .bench-shell[data-armed="true"] .bench-pilot .bench-connect,
   .bench-shell[data-armed="true"] .bench-pilot-row p { display: none; }
-  .bench-shell[data-armed="true"] .bench-pilot .bench-panel-body { padding: 8px 12px; }
+  .bench-shell[data-armed="true"] .bench-pilot .bench-panel-body { position: relative; padding: 8px 12px; }
+  .bench-shell[data-armed="true"] .bench-pilot-row { min-height: 44px; padding-right: 140px; }
+  .bench-shell[data-armed="true"] .bench-pilot-row > button { display: none; }
+  .bench-shell[data-armed="true"] .bench-enable { position: absolute; top: 8px; right: 12px; width: auto; min-width: 124px; margin: 0; }
   .bench-shell[data-armed="true"] .camera-panel { order: 0; position: relative; }
   .bench-shell[data-armed="true"] .camera-panel:not(:fullscreen) .panel-heading { height: 0; min-height: 0; padding: 0; border: 0; }
   .bench-shell[data-armed="true"] .camera-panel:not(:fullscreen) .heading-icon,

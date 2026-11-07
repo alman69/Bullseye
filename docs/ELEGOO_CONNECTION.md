@@ -2,8 +2,8 @@
 
 The preserved factory source exposes a raw TCP server at **192.168.4.1:100** on
 the ESP32 access point. The phone app is not needed to speak this protocol.
-This is a source-derived expectation; the running firmware and physical bridge
-still need to pass the test below. No firmware changes or flashing are involved.
+The procedure below reproduces the owner's successful connection tests.
+No firmware changes or flashing are involved.
 
 **Owner-reported test, November 7, 2026:** the laptop connected to
 `ELEGOO-2436CBF61B44`, exchanged ESP32 heartbeats, received `{ok}` for STOP,
@@ -12,7 +12,10 @@ short and remains uncalibrated. The owner subsequently reported all four wheels
 turning forward during the initial bench pulse. Physical stopping latency and
 behavior on control loss have not been measured.
 The owner also reported the one-second forward test working, including slower
-rotation at base PWM 40. Reverse and turns are still unverified.
+rotation at base PWM 40. Individual wheel-speed calibration remains pending.
+The owner subsequently reported successful operation of the browser controller
+on the ground. This is a functional test, not calibration or a stop-latency
+measurement. The browser now supports held-key input and live distance updates.
 
 The separate camera HTTP service and TCP command service can work independently.
 A live camera does not prove that commands reach the UNO.
@@ -153,23 +156,24 @@ one N2, never automatically retries, and requires the preflight STOP reply.
 
 ## Before dashboard movement
 
-The separate browser **bench demo** below exposes finite steps under the same
-wheels-raised conditions. This does not enable continuous driving in the mission
-dashboard, validate command-loss timing, or enable autonomous navigation.
+The separate browser controller below supports held keys and finite button steps.
+This does not enable autonomous navigation or validate a strict hardware stop
+deadline. The command-line bench test above retains its original test conditions.
 
 Do not enable dashboard hardware controls based solely on this probe. First verify
 each direction with wheels elevated, then verify stopping and command-loss behavior.
 The source maps timed command **N2** as left=1, right=2, forward=3, backward=4;
 its fields are `D1` direction, `D2` base PWM speed, and `T` duration in milliseconds.
-Physical wheel direction has not been verified. `T=0` disables its duration limit.
+Forward direction was owner-verified. `T=0` disables the duration limit.
 The N3/N4 paths have no command duration limit and are unsuitable for this initial
 test. No motion command is exposed by the diagnostic.
 
-The factory timeout is checked from the UNO loop, which also performs a blocking
-ultrasonic measurement. Do not assume a strict 300 ms device stop deadline or use
+The factory timeout is checked from the UNO loop. N21 ultrasonic queries and
+autonomous modes can perform blocking measurements. Do not assume a strict
+300 ms device stop deadline or use
 the ESP32's several-second heartbeat as its replacement. The teammate's firmware
-work must establish the independent motion timeout before real dashboard driving
-is enabled. The existing hardware adapter remains disabled.
+work must establish the independent motion timeout for reliable navigation.
+The normal mission dashboard's hardware adapter remains disabled.
 
 ## Local browser control demo
 
@@ -186,58 +190,76 @@ dependencies. It explicitly enables `BULLSEYE_MODE=hardware` and
 `BULLSEYE_BENCH_ENABLED=1`. A normal server launch keeps the bench API disabled.
 No TCP command connection or movement is opened automatically.
 
-1. Secure the rover with all wheels raised; physical power OFF must remain in
-   reach. Use battery power, USB disconnected, switch **Cam**, and close all app
-   or CLI controllers. Join `ELEGOO-2436CBF61B44` on the laptop.
+1. Use battery power, USB disconnected, switch **Cam**, and close other app or
+   CLI controllers. Join `ELEGOO-2436CBF61B44` on the laptop.
 2. Open the page and **Claim controls**. Click **Connect rover bridge**. This
    opens one TCP connection, exchanges STOP and a uniquely identified sensor
    query, and then echoes ESP32 heartbeats continuously. Failed connections do
    not automatically reconnect or replay movement.
-3. Confirm the wheels-raised checkbox, then **Enable single steps**. Start with
-   **Forward**, base PWM **40**, duration **0.2 seconds**. Each button click sends
-   one N2 followed by STOP. Holding does not repeat, overlapping steps are
-   rejected, and delayed requests from the preceding step cannot advance.
-4. Test reverse/left/right individually and observe the actual wheel direction.
-   The page offers 0.2/0.5/1 second steps and base PWM 40–100. These are requested
-   values; existing firmware may adjust motor PWM and delay physical stopping.
-5. **STOP** is available to every viewer, latches steps off, and interrupts the
-   pending action without waiting for its completion. It reports software STOP
-   acknowledgements separately from physical verification. Check the wheels.
-   Re-enable explicitly after STOP; reconnection never resumes motion.
+3. Click the red **Enable controls** button; it becomes **Disable controls**.
+   There is no wheels-raised checkbox. Enabling alone never starts movement.
+4. Hold **WASD / arrow keys** to drive and release to request STOP. The most
+   recently pressed direction wins; releasing it falls back to another key
+   still physically held. Native OS key-repeat is ignored. Mouse/touch direction
+   buttons keep their existing one-click, one-step behavior with 0.2/0.5/1 second
+   durations. Base PWM remains 40–100 (default 40).
+5. **Disable controls**, **STOP**, and **Space** stop and disable movement.
+   Every viewer may STOP. Re-enabling after STOP is explicit; reconnecting never
+   resumes motion. Page blur/hiding, pilot disconnect, or expired ownership also
+   disable controls. A release stops the keyboard gesture without disabling the
+   pilot's controls.
 
-Arrow keys/WASD send one step on initial keydown, with no key-repeat; releasing
-that key requests STOP early. Space requests latched STOP. Page blur, hiding,
-pilot WebSocket disconnect, or a three-second pilot lease expiry requests STOP
-and disables steps. Ownership renews once per second; latency pings do not renew
-it. Mouse/touch direction buttons intentionally complete their single timed step
-after a click rather than implementing hold-to-drive.
+Held input has its own **350 ms** server lease, renewed every **100 ms** while
+the key is physically held. Only one unacknowledged renewal is sent at a time.
+Late renewals/end events cannot restart motion or affect a new gesture. Pilot
+ownership separately renews every second and expires after three seconds; latency
+pings do not renew it. Browser disconnection clears the held keys; reconnection
+does not replay them.
+
+The bridge sends N2 movement with a nonzero **300 ms** firmware timer. It then
+waits for a uniquely identified **N22/D1=0** response reading the UNO's cached IR
+value before sending another movement update. This read does not change motor
+mode or trigger the blocking ultrasonic measurement; its value is only used to
+confirm UNO processing, not for navigation. No N3/N4 unbounded movement is sent.
+A missing/malformed cached response stops the action rather than queueing moves.
+Timed button clicks remain separate and retain their pre/post STOP checks.
+
+Ultrasonic distance updates target **2 Hz while idle** and roughly **1 Hz while
+held driving**. N21 performs a blocking measurement inside the UNO, so driving
+briefly stops before that query, then resumes only while the current key lease
+remains valid. This can produce short pauses; firmware changes would be needed
+for smooth driving with nonblocking telemetry. Sensors and motion transactions
+are serialized; STOP bypasses that transaction lock. There is no measurement queue.
+The browser shows reading age, Live/Stale/Invalid status, zero as **No echo**, and
+150 cm as the vendor's clamped **150+ cm**. Distance is uncalibrated and is not
+automatic obstacle avoidance. A stale value is not presented as fresh clear space.
 
 The frontend, `/ws/bench`, `/api/bench/state`, `/api/bench/stop`, and shared
 `/ws/video` use the same origin. Browser commands are acknowledged when accepted
 by the coordinator; the activity log later reports hardware completion/failure.
 One browser owns the pilot seat; another can watch or STOP. Command IDs are
 deduplicated, and the arm token rotates after each action and on re-enabling.
-Only one hardware operation can run at a time; there is no movement queue.
+Only one movement operation can run at a time; there is no movement queue.
 
 The existing camera relay defaults to **http://192.168.4.1:81/stream** in bench
 mode. This is the vendor-source URL and remains a physical setup check. Override
 `CAMERA_STREAM_URL` in `mission-control/server/.env` if the known working stream
 uses another URL. `ROVER_HOST` and `ROVER_PORT` are laptop-only settings. Camera
-configuration/credentials are never editable from the shared page. Distance is
-a connection-time, uncalibrated snapshot, not collision protection.
+configuration/credentials are never editable from the shared page.
 
 Without a second Internet connection the local page still works on rover Wi-Fi.
 Chat and Cloudflare Tunnel will not. When dual connectivity is available, use
 `cloudflared tunnel --url http://127.0.0.1:8001` and append `/bench` to the public
 URL. The normal mission dashboard still uses the disabled hardware stub; the
-global `/api/stop` also stops this bench controller. Real autonomy and continuous
-manual driving await firmware timeout validation.
+global `/api/stop` also stops this manual controller. Autonomous navigation and
+strict physical stop-time guarantees still require firmware validation. No
+firmware is modified by the browser controller.
 
 ## Source references
 
 - `firmware/esp32-camera/ESP32_CameraServer_AP_20220120/ESP32_CameraServer_AP_20220120.ino`:
   TCP port 100, brace framing, heartbeat echo, UART relay, disconnect STOP.
 - `firmware/arduino-uno/SmartRobotCarV4.0_V1_20230201/ApplicationFunctionSet_xxx0.cpp`:
-  N100 STOP, N21 distance query, N2 timed movement and direction mapping.
+  N100 STOP, N21 distance query, N22 cached IR response, N2 timed movement and direction mapping.
 - The same folder's `DeviceDriverSet_xxx0.cpp`: zero/no echo and 150 cm clamp.
 - [Source provenance and protocol PDF](SOURCE_REFERENCES.md).

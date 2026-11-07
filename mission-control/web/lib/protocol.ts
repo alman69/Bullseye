@@ -58,6 +58,10 @@ export type MissionState = {
     heartbeats: number;
     max_duration_ms: number;
     max_speed: number;
+    drive_mode?: "step" | "hold" | null;
+    hold_id?: string | null;
+    distance_status?: "live" | "invalid" | "stale" | "unavailable";
+    distance_age_ms?: number | null;
   };
   events: { id: string; at: string; message: string; level: string }[];
 };
