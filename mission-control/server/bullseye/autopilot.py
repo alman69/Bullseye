@@ -31,6 +31,7 @@ import asyncio
 import time
 
 RED, GREEN = (255, 0, 0), (0, 255, 0)
+GLIMPSE_COOLDOWN = 3      # after chasing a glimpse that didn't pan out, ignore glimpses for this many moves
 MOVE_TO_DIRECTION = {"turn_left": "left", "turn_right": "right", "forward": "forward", "backward": "backward"}
 TURN_DIRECTION = "left"
 
@@ -170,6 +171,7 @@ class Autopilot:
         decided_seq = seq        # newest frame at the previous decision
         move = None              # the last move: kind, ms and when the wheels turned
         relook = 0               # "look again" decisions left after turning back to a glimpse
+        cooldown = 0             # moves left during which glimpses are ignored (a chase just failed)
         steps = 0
         while max_steps is None or steps < max_steps:
             steps += 1
@@ -179,9 +181,10 @@ class Autopilot:
             detected = det is not None and det.detected
             action = None
             if detected or planner.was_at_line:      # at the stop line, vanishing = arrived (planner decides)
-                relook = 0
+                relook = cooldown = 0
             else:
-                bearing = self._glimpse(color, decided_seq, move, planner)
+                # Don't chase a new glimpse while still checking the last one, or right after one failed.
+                bearing = None if (cooldown > 0 or relook > 0) else self._glimpse(color, decided_seq, move, planner)
                 if bearing is not None:
                     relook = 2
                     side = "right" if bearing > 0 else "left"
@@ -194,6 +197,8 @@ class Autopilot:
                 elif relook > 0:
                     relook -= 1
                     action = planner._action("stop", f"Looking again where {color} was seen ({2 - relook}/2).")
+                    if relook == 0:
+                        cooldown = GLIMPSE_COOLDOWN       # not there: probably a false flicker, keep searching
             decided_seq = self._seq()
             if action is None:
                 # The floor check always guards exploring (so it never drives into a wall); while
@@ -215,6 +220,8 @@ class Autopilot:
                 return True
             seq = self._seq()
             move = None
+            if cooldown > 0 and action.kind in MOVE_TO_DIRECTION and relook == 0:
+                cooldown -= 1
             if action.kind in MOVE_TO_DIRECTION:
                 started = time.monotonic()
                 await self._step(action.kind, action.pwm, action.duration_ms)

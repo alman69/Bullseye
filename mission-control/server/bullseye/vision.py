@@ -189,7 +189,8 @@ class VisionService:
             action = self.nav.update(frame, det, self.detector, prepared=prepared)
             self._image, self._prepared, self._det = image, prepared, det
             if det.detected:
-                self.last_seen = {"seq": seq, "t": frame.received_at, "target": self.target, "err": float(det.horizontal_error)}
+                self.last_seen = {"seq": seq, "t": frame.received_at, "target": self.target, "err": float(det.horizontal_error),
+                                  "top": det.bbox[1] / det.frame_height if det.bbox and det.frame_height else 0.0}
             self._processed_at = time.monotonic()
             result = self._result(image, det, action, seq)
             now = time.monotonic()
