@@ -176,6 +176,18 @@ function ColorsTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: Vis
         >
           Clear {ui.samplingClass ?? "class"}
         </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!canAct || totalSamples === 0}
+          onClick={() => {
+            if (window.confirm("Delete ALL color samples? Do this after changing camera settings, then sample every class again.")) {
+              void act("vision_clear_samples", {});
+            }
+          }}
+        >
+          Clear all samples
+        </Button>
         <label className="vision-select">
           Detector
           <select

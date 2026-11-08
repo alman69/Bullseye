@@ -79,6 +79,15 @@ describe("VisionCalibration", () => {
     expect((screen.getByRole("button", { name: "Fit color model" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("clears all samples after confirmation", () => {
+    const act = vi.fn().mockResolvedValue(true);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<VisionCalibration vision={summary} ui={ui()} canAct act={act} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Colors/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear all samples" }));
+    expect(act).toHaveBeenCalledWith("vision_clear_samples", {});
+  });
+
   it("warns when samples exist but no model is fitted", () => {
     render(<VisionCalibration vision={{ ...summary, model_fitted: false }} ui={ui()} canAct act={vi.fn()} />);
     fireEvent.click(screen.getByRole("tab", { name: /Colors/ }));
