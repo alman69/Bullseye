@@ -7,6 +7,11 @@ from uuid import uuid4
 from .elegoo_bench import DIRECTIONS, validate_pulse
 from .elegoo_probe import FrameParser
 from .mission import CommandError, utc_now
+from .scooper import ScooperLink
+
+# Bench command kind -> scooper firmware command.
+SCOOPER_ACTIONS = {"scooper_squeeze": "squeeze", "scooper_release": "release", "scooper_home": "home"}
+SCOOPER_LABELS = {"squeeze": "Squeeze", "release": "Release", "home": "Straight down"}
 
 
 class FactoryBridge:
@@ -206,9 +211,12 @@ class FactoryBridge:
 
 
 class BenchControl:
-    def __init__(self, settings, camera, bridge=None):
+    def __init__(self, settings, camera, bridge=None, scooper=None):
         self.settings, self.camera = settings, camera
         self.bridge = bridge or FactoryBridge(settings.rover_host, settings.rover_port)
+        # The scooper is a separate ESP32-S3 on USB, independent of the rover bridge.
+        self.scooper = scooper or ScooperLink(settings.scooper_port)
+        self.scooper.on_change = self.publish
         self.lock = asyncio.Lock()
         self.pilot = None
         self.lease_until = 0
@@ -254,7 +262,8 @@ class BenchControl:
                       "direction": self.direction, "stop_pending": self.stop_pending,
                       "heartbeats": self.bridge.heartbeats, "max_duration_ms": 1000, "max_speed": 100,
                       "drive_mode": self.drive_mode, "hold_id": self.hold_id,
-                      "distance_age_ms": distance_age, "distance_status": distance_status},
+                      "distance_age_ms": distance_age, "distance_status": distance_status,
+                      "scooper": self.scooper.snapshot()},
         }
 
     def publish(self):
@@ -296,6 +305,16 @@ class BenchControl:
         task = asyncio.create_task(stop_request())
         self.stop_jobs.add(task)
         task.add_done_callback(self.stop_jobs.discard)
+        if latched and self.scooper.ready:
+            # A real STOP also freezes the sticks where they are (they keep holding).
+            async def scooper_stop():
+                try:
+                    await self.scooper.command("stop")
+                except Exception:
+                    self.log("Scooper STOP was not acknowledged; check the scooper.", "warning")
+            job = asyncio.create_task(scooper_stop())
+            self.stop_jobs.add(job)
+            job.add_done_callback(self.stop_jobs.discard)
         self.publish()
 
     async def stop(self, reason="STOP requested. Enable controls to continue."):
@@ -399,6 +418,16 @@ class BenchControl:
                         self.drive_mode = "step"
                         self.log(f"One {self.direction} step requested: PWM {payload['speed']}/255, {payload['duration_ms']} ms.")
                         self.launch(lambda: self.bridge.pulse(payload["direction"], payload["speed"], payload["duration_ms"]), "Step finished. STOP acknowledged in software.")
+                elif kind == "scooper_connect":
+                    self.log("Scooper USB link: connecting…")
+                    self._scooper_job(self._scooper_connect())
+                elif kind in SCOOPER_ACTIONS:
+                    # Independent of the rover controls: the pilot seat is enough.
+                    if not self.scooper.ready:
+                        raise CommandError("Connect the scooper USB link first.")
+                    name = SCOOPER_ACTIONS[kind]
+                    self._scooper_job(self._scooper_command(name))
+                    self.log(f"Scooper: {SCOOPER_LABELS[name]} requested.")
                 else:
                     raise CommandError("Unknown rover command. Autonomous missions are unavailable.")
             self.publish()
@@ -408,6 +437,33 @@ class BenchControl:
             validate_pulse(payload.get("direction"), payload.get("speed"), payload.get("duration_ms") if timed else 300)
         except (ValueError, TypeError):
             raise CommandError("Choose a direction, PWM 1–100, and a button duration of 50–1000 ms.")
+
+    def _scooper_job(self, job):
+        try:
+            self.scooper.launch(job)
+        except RuntimeError:
+            job.close()
+            raise CommandError("The scooper is still answering the last command.")
+
+    async def _scooper_connect(self):
+        await self.scooper.connect()
+        if self.scooper.ready:
+            self.log(f"Scooper connected on {self.scooper.port}; sticks report {self.scooper.state}.", "success")
+        else:
+            self.log(f"Scooper not connected: {self.scooper.error}", "warning")
+        self.publish()
+
+    async def _scooper_command(self, name):
+        try:
+            result = await self.scooper.command(name)
+        except ConnectionError as exc:
+            self.log(f"Scooper link failed: {exc}", "warning")
+        else:
+            if result is True:
+                self.log(f"Scooper: {SCOOPER_LABELS[name]} started.", "success")
+            else:
+                self.log(f"Scooper refused {SCOOPER_LABELS[name]}: {result}", "warning")
+        self.publish()
 
     async def _hold(self, hold_id):
         def current():
@@ -467,3 +523,7 @@ class BenchControl:
         await self.bridge.stop()
         await self.bridge.close()
         await asyncio.gather(*self.stop_jobs, return_exceptions=True)
+        if self.scooper.task:
+            self.scooper.task.cancel()
+            await asyncio.gather(self.scooper.task, return_exceptions=True)
+        await self.scooper.close()

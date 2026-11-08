@@ -17,6 +17,7 @@ class Settings:
     bench_enabled: bool = False
     rover_host: str = "192.168.4.1"
     rover_port: int = 100
+    scooper_port: str = ""  # USB serial port of the scooper ESP32-S3; empty = auto-detect.
     web_dist: Path = Path(__file__).resolve().parents[2] / "web" / "dist"
     # Vision runs inside this server on the camera relay's frames (bullseye/vision.py).
     # Off by default for tests; from_env() turns it on unless BULLSEYE_VISION=0.
@@ -43,6 +44,7 @@ class Settings:
             bench_enabled=bench,
             rover_host=os.getenv("ROVER_HOST", "192.168.4.1"),
             rover_port=int(os.getenv("ROVER_PORT", "100")),
+            scooper_port=os.getenv("SCOOPER_PORT", ""),
             vision_enabled=os.getenv("BULLSEYE_VISION", "1") == "1",
             vision_dir=Path(os.getenv("BULLSEYE_VISION_DIR", str(cls.vision_dir))),
         )

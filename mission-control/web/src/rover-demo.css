@@ -32,6 +32,18 @@
 .bench-pad button { display: flex; flex-direction: column; gap: 4px; background: #1c3047; border: 1px solid #364e67; font-size: 10px; }
 .bench-pad button:not(:disabled):hover { background: #344a60; }
 .bench-pad button:disabled { opacity: .35; }
+.bench-scooper-readout { display: flex; align-items: center; justify-content: center; gap: 18px; }
+.bench-scooper-readout strong { display: block; font-size: 18px; font-weight: 500; }
+.bench-scooper-readout small { color: #9bacc1; font-size: 11px; }
+.bench-scooper-diagram { width: 120px; height: 60px; flex: none; }
+.bench-scooper-chassis { stroke: #364e67; stroke-width: 6; stroke-linecap: round; }
+.bench-scooper-stick { stroke: #e9c46a; stroke-width: 4; stroke-linecap: round; transition: all .3s ease; }
+.bench-scooper-hub { fill: #efe7d4; }
+.bench-scooper-squeeze { width: 100%; margin-top: 16px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.bench-scooper-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px; }
+.bench-scooper-row button { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 0 6px; background: #1c3047; border: 1px solid #364e67; font-size: 11px; }
+.bench-scooper-row button:not(:disabled):hover { background: #344a60; }
+.bench-scooper-row button:disabled, .bench-scooper-squeeze:disabled { opacity: .35; }
 .bench-pad button svg { width: 19px; height: 19px; }
 .bench-pad .bench-up { grid-column: 2; }
 .bench-pad .bench-turn { grid-row: 2; }

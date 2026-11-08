@@ -64,9 +64,22 @@ export type MissionState = {
     hold_id?: string | null;
     distance_status?: "live" | "invalid" | "stale" | "unavailable";
     distance_age_ms?: number | null;
+    scooper?: ScooperState;
   };
   events: { id: string; at: string; message: string; level: string }[];
   vision?: VisionSummary | null;
+};
+// Scooper ESP32-S3 over USB (server/bullseye/scooper.py). Angles: 90 = straight down.
+export type ScooperState = {
+  available: boolean;
+  status: "disconnected" | "connecting" | "ready" | "error";
+  port: string | null;
+  error: string | null;
+  state: "relaxed" | "holding" | "moving" | "sequence" | null;
+  sequence: string | null;
+  step: string | null;
+  angles: Record<string, number>;
+  busy: string | null;
 };
 export type CommandPayload = Record<string, unknown>;
 export type LinkLatency = {

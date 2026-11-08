@@ -1,0 +1,66 @@
+#pragma once
+// Everything you are expected to edit lives here: pins, limits, trims and poses.
+//
+// Angles are "logical" degrees, the same for both sticks:
+//   90 = stick pointing straight down, lower = swung outward, higher = swung inward.
+// The right servo is mounted mirror-image, so `inverted` flips its angles on the way
+// out (180 - angle). That makes one pose move both sticks out (or in) together.
+#include <stdint.h>
+
+namespace scooper {
+
+constexpr uint8_t kJointCount = 2;
+
+struct Joint {
+  const char* name;  // Shown in `status` and parsed by Mission Control.
+  uint8_t pin;       // ESP32-S3 GPIO number.
+  uint8_t minDeg;    // Soft limits (logical degrees): commands outside are rejected.
+  uint8_t maxDeg;
+  uint8_t homeDeg;   // Pose at power-up and on `home`: straight down.
+  int8_t trimDeg;    // Added at the servo to correct the horn's spline offset.
+  bool inverted;     // Mirror-mounted servo.
+};
+
+// The squeeze, as described: start straight down, swing out ~30°, then back in
+// to ~80° inward of straight down (a 110° swing that ends under the block).
+constexpr uint8_t kDownDeg = 90;
+constexpr uint8_t kOutDeg = kDownDeg - 30;
+constexpr uint8_t kInDeg = kDownDeg + 80;
+
+// SG90 wiring on the header with GPIO37: signal on GPIO41 (left) and GPIO42 (right).
+// Not 35/36/37 on that header: the board's octal PSRAM uses them. Also avoid 0/45/46
+// (boot strapping), 19/20 (USB), 43/44 (debug UART) and 4-13 (display + touch).
+constexpr Joint kJoints[kJointCount] = {
+    {"left", 41, kOutDeg - 10, kInDeg + 5, kDownDeg, 0, false},
+    {"right", 42, kOutDeg - 10, kInDeg + 5, kDownDeg, 0, true},
+};
+
+// SG90: 50 Hz, about 500 us = 0° to 2400 us = 180° (the rover's pan servo uses the same).
+constexpr uint16_t kPulseMinUs = 500;
+constexpr uint16_t kPulseMaxUs = 2400;
+constexpr uint16_t kServoHz = 50;
+
+constexpr uint16_t kDefaultDegPerSec = 90;
+
+// A sequence is a short list of steps. Each step moves both sticks together at
+// degPerSec (they start level and travel equally, so they arrive together), then
+// waits holdMs. kKeep leaves a joint where it is.
+constexpr int16_t kKeep = -1;
+struct Step {
+  const char* label;
+  int16_t deg[kJointCount];
+  uint16_t degPerSec;
+  uint16_t holdMs;
+};
+
+constexpr Step kSqueezeSteps[] = {
+    {"down", {kDownDeg, kDownDeg}, 90, 200},
+    {"out", {kOutDeg, kOutDeg}, 90, 300},
+    {"in", {kInDeg, kInDeg}, 60, 0},  // Slower, so the block is lifted, not knocked.
+};
+constexpr Step kReleaseSteps[] = {
+    {"out", {kOutDeg, kOutDeg}, 90, 300},
+    {"down", {kDownDeg, kDownDeg}, 90, 0},
+};
+
+}  // namespace scooper
