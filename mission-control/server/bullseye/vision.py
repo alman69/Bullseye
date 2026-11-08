@@ -280,6 +280,7 @@ class VisionService:
             "fov": {"captures": self.fov_captures, "hfov_deg": self.cfg["navigation"].get("camera_hfov_deg")},
             "steps": self.cfg["navigation"].get("steps", {"forward": {}, "turn": {}}),
             "tuning": {key: self._get(key) for key in TUNABLE},
+            "hsv": {c: self.cfg["colors"][c] for c in TARGETS if c in self.cfg["colors"]},
         }
 
     def _get(self, dotted: str):
@@ -491,6 +492,24 @@ class VisionService:
             self.cfg["ground"]["stop_line_y"] = model.row_for_distance(float(value))
         self._reload()
         self.message = f"{key} = {kind(value)}"
+
+    def _cmd_hsv(self, p):
+        """Set one color's HSV range (OpenCV H 0-179, S/V 0-255). H low > H high wraps (red)."""
+        color = p.get("color")
+        if color not in TARGETS:
+            raise CommandError("Choose red, green, blue, yellow or black.")
+        clean = {}
+        for key, top in (("h", 179), ("s", 255), ("v", 255)):
+            pair = p.get(key)
+            if not (isinstance(pair, list) and len(pair) == 2 and all(
+                    isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top for x in pair)):
+                raise CommandError(f"{key.upper()} must be two whole numbers from 0 to {top}.")
+            if key != "h" and pair[0] > pair[1]:
+                raise CommandError(f"{key.upper()} low must not be above {key.upper()} high.")
+            clean[key] = list(pair)
+        self.cfg["colors"][color] = clean
+        self._reload()
+        self.message = f"HSV {color}: H {clean['h']} S {clean['s']} V {clean['v']}"
 
     def _cmd_camera(self, p):
         key, value = p.get("key"), p.get("value")

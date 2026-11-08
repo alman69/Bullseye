@@ -255,3 +255,15 @@ def test_camera_settings_validated_saved_and_sent(vision_dir, monkeypatch):
     sim = service(vision_dir)                                               # no real camera: saved, not sent
     run(sim, "vision_camera", {"key": "ae_level", "value": -1})
     assert "not sent" in sim.summary()["camera"]["message"]
+
+
+def test_hsv_range_command(vision_dir):
+    svc = service(vision_dir)
+    run(svc, "vision_hsv", {"color": "red", "h": [176, 10], "s": [100, 255], "v": [70, 255]})
+    assert svc.summary()["hsv"]["red"] == {"h": [176, 10], "s": [100, 255], "v": [70, 255]}
+    assert json.loads((vision_dir / "config.json").read_text())["colors"]["red"]["h"] == [176, 10]
+    for bad in ({"color": "red", "h": [0, 200], "s": [0, 255], "v": [0, 255]},
+                {"color": "red", "h": [0, 10], "s": [200, 100], "v": [0, 255]},
+                {"color": "purple", "h": [0, 10], "s": [0, 255], "v": [0, 255]}):
+        with pytest.raises(CommandError):
+            run(svc, "vision_hsv", bad)
