@@ -165,8 +165,25 @@ Browser dashboard (/ and /bench): video + vision overlay, Vision panel, Calibrat
 Separate: BLE sender reads the cached /api/bench/state → ESP32-S3 display
 ```
 
-**What isn't built yet:** **autonomous driving.** The planner only reports the move it *would*
-make. Nothing in vision sends motor commands.
+**Demo autopilot (PR #12, on `/bench`)**, the "dumb autonomous" plan for the demo:
+1. Pick a mineral color and press **Go to <color>**. The rover aims and steps toward it, then stops
+   at it (stop line, or by size if the stop line isn't calibrated).
+2. Pick the mineral up **by hand**.
+3. Press **Return to base**: it turns ~180° (from the measured step table: 3×1.0 s + 0.5 s + 0.2 s,
+   to the left), then drives to the **black flag** (black = dark pixels; adjust "Black flag: max
+   brightness" in Tuning).
+4. Drop the mineral by hand.
+
+How it works:
+- **One step at a time:** every move is one N2 timed step through `FactoryBridge.pulse` (STOP
+  before and after). After each step it waits for a fresh frame, then asks the planner for the next
+  step.
+- **"Avoid obstacles: on/off":** uses the camera floor check (off = drive straight at the target).
+- **STOP** cancels it immediately. If the target is lost after a full search turn, it stops and
+  says so.
+- **Needs** the bridge connected and controls enabled.
+- **Code:** `bullseye/autopilot.py`, `/bench` commands `auto_goto` and `auto_return`, and
+  `components/autopilot-panel.tsx`.
 
 ## 6. Vision details (`software/vision/bullseye_vision` + `mission-control/server/bullseye/vision.py`)
 
@@ -256,6 +273,10 @@ the standalone app and Mission Control. The dashboard writes them.
    - **D:** ball at the stop line → ARRIVED
    - **E:** obstacle in between → AVOID
 7. **Commit** `color_model.json` and `config.json` once checks 2–6 pass.
+
+**Testing the demo autopilot (§5):** wheels raised first. Check that Go to <color> aims the right way
+and Return to base turns ~180°. Then run it on the floor with a clear path, and turn on "Avoid
+obstacles" only once the plain run works.
 
 **Then, the big remaining work:**
 - **A real `RoverAdapter`** (autonomous driving): execute the planner's moves through

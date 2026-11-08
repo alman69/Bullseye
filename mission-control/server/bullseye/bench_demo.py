@@ -4,6 +4,7 @@ from collections import deque
 import time
 from uuid import uuid4
 
+from .autopilot import Autopilot, AutopilotError
 from .elegoo_bench import DIRECTIONS, validate_pulse
 from .elegoo_probe import FrameParser
 from .mission import CommandError, utc_now
@@ -228,6 +229,7 @@ class BenchControl:
         self.subscribers = set()
         self.stop_jobs = set()
         self.vision = None   # VisionService, attached by create_app when enabled
+        self.auto = {"state": "idle", "message": "Autopilot ready when controls are enabled."}
         self.log("Rover control online. Connect the bridge, then enable controls.")
 
     def log(self, message, level="info"):
@@ -254,7 +256,8 @@ class BenchControl:
                       "direction": self.direction, "stop_pending": self.stop_pending,
                       "heartbeats": self.bridge.heartbeats, "max_duration_ms": 1000, "max_speed": 100,
                       "drive_mode": self.drive_mode, "hold_id": self.hold_id,
-                      "distance_age_ms": distance_age, "distance_status": distance_status},
+                      "distance_age_ms": distance_age, "distance_status": distance_status,
+                      "auto": dict(self.auto)},
         }
 
     def publish(self):
@@ -399,9 +402,50 @@ class BenchControl:
                         self.drive_mode = "step"
                         self.log(f"One {self.direction} step requested: PWM {payload['speed']}/255, {payload['duration_ms']} ms.")
                         self.launch(lambda: self.bridge.pulse(payload["direction"], payload["speed"], payload["duration_ms"]), "Step finished. STOP acknowledged in software.")
+                elif kind in {"auto_goto", "auto_return"}:
+                    if not self.armed or not self.bridge.connected or self.stopped:
+                        raise CommandError("Connect and enable controls first.")
+                    if self.operation or self.stop_pending:
+                        raise CommandError("A step or STOP is in progress. Commands are not queued.")
+                    if payload.get("arm_token") != self.arm_token:
+                        raise CommandError("This request is outdated. Use the current controls.")
+                    if not self.vision or not self.vision.available:
+                        raise CommandError("Vision is not running, so the autopilot can't see.")
+                    avoid = payload.get("avoid") is True
+                    if kind == "auto_goto":
+                        color = payload.get("color")
+                        if color not in ("red", "green", "blue", "yellow", "black"):
+                            raise CommandError("Choose red, green, blue, yellow or black.")
+                        label = f"Autopilot: go to {color}" + (" (avoiding obstacles)" if avoid else "")
+                        job = lambda pilot: pilot.go_to(color, avoid=avoid)
+                    else:
+                        label = "Autopilot: turn around and go to the black flag" + (" (avoiding obstacles)" if avoid else "")
+                        job = lambda pilot: pilot.return_to_base(avoid=avoid)
+                    self.direction, self.drive_mode = "auto", "auto"
+                    self.log(label + ".")
+                    self.launch(lambda: self._autopilot(job), "Autopilot finished. STOP acknowledged in software.")
                 else:
-                    raise CommandError("Unknown rover command. Autonomous missions are unavailable.")
+                    raise CommandError("Unknown rover command.")
             self.publish()
+
+    def _report(self, state, message):
+        self.auto = {"state": state, "message": message}
+        self.publish()
+
+    async def _autopilot(self, job):
+        pilot = Autopilot(self.bridge, self.vision, self._report)
+        self._report("running", "Autopilot started.")
+        try:
+            await job(pilot)
+        except asyncio.CancelledError:
+            self._report("stopped", "Autopilot stopped.")
+            raise
+        except AutopilotError as error:          # target lost etc.: stop, keep controls enabled
+            self._report("failed", str(error))
+            self.log(str(error), "warning")
+            await self.bridge.stop()
+        if self.auto["state"] == "running":
+            self._report("done", "Autopilot finished.")
 
     def validate_drive(self, payload, *, timed=False):
         try:

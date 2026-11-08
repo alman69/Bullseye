@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { CameraView } from "@/components/camera-view";
 import { VisionCalibration } from "@/components/vision-calibration";
 import { VisionPanel } from "@/components/vision-panel";
+import { AutopilotPanel } from "@/components/autopilot-panel";
 import { useVisionUi } from "@/hooks/use-vision-ui";
 import { useMission } from "@/hooks/use-mission";
 import { useRoverKeyboard } from "@/hooks/use-rover-keyboard";
@@ -65,6 +66,7 @@ export default function RoverDemo() {
           <div className="bench-left">
             <CameraView state={state} connected={connected} onStop={() => void stop()} vision={state?.vision?.available ? visionUi.overlay : undefined} />
             {visionUi.calibrating && <VisionCalibration vision={state?.vision} ui={visionUi} canAct={connected && isPilot} act={act} />}
+            <AutopilotPanel state={state} canStep={canStep} act={act} />
             <VisionPanel vision={state?.vision} ui={visionUi} canAct={connected && isPilot} act={act} targetControl />
             <section className="panel bench-status" aria-label="Connection diagnostics">
               <div><Radio size={17} /><span>Browser → laptop</span><strong>{connected ? latency.rttMs != null ? `${latency.rttMs} ms` : "Connected" : "Disconnected"}</strong><small>Round-trip to this server only</small></div>

@@ -40,7 +40,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-COLORS = ("red", "yellow", "green", "blue")
+COLORS = ("red", "yellow", "green", "blue", "black")
 Prepared = namedtuple("Prepared", "corrected labels")   # white-balanced frame + class-index image
 LEFT, CENTER, RIGHT, NONE = "LEFT", "CENTER", "RIGHT", "NONE"
 
