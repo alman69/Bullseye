@@ -1,5 +1,9 @@
 # Separate BLE telemetry display
 
+For this display **plus the scooper on the same ESP32-S3**, use the
+[combined one-file upload](../firmware/esp32-companion/README.md). BLE UUIDs,
+the sender commands and the full-screen animated face remain unchanged.
+
 The Mac reads **cached ultrasonic telemetry** from the existing real-rover
 controller and forwards it to a separate ESP32-S3 touchscreen over BLE. It can
 keep Wi-Fi connected to the rover at the same time. Neither the sender nor the

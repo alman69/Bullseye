@@ -12,14 +12,19 @@ this laptop already uses for the camera and rover commands, and serves a tiny HT
 While connected, /status is polled so the dashboard shows each squeeze step.
 """
 import asyncio
+import math
 
 import httpx
 
 DEFAULT_URL = "http://192.168.4.50"
 REQUEST_TIMEOUT_S = 1.5
 POLL_S = 0.5
-MAX_MISSED_POLLS = 4  # About two seconds of silence before the link is marked lost.
+MAX_MISSED_POLLS = 4  # Four misses including request latency; device watchdog is independent.
 COMMANDS = {"squeeze", "release", "home", "stop", "relax"}
+
+
+class BoardRestarted(ConnectionError):
+    pass
 
 
 def describe(exc):
@@ -39,6 +44,13 @@ class ScooperLink:
         self.on_change = lambda: None
         self.task = None  # The bench's one background job (connect or a command).
         self.poller = None
+        self.stop_task = None
+        self.boot_id = None
+        self.firmware = None
+        self.command_sequence = 0
+        self.reported_sequence = 0
+        self.generation = 0
+        self.busy_request = None
 
     @property
     def ready(self):
@@ -47,31 +59,50 @@ class ScooperLink:
     def snapshot(self):
         return {"available": True, "status": self.status, "address": self.url, "error": self.error,
                 "state": self.state, "sequence": self.sequence, "step": self.step,
-                "angles": dict(self.angles), "busy": self.busy}
+                "angles": dict(self.angles), "busy": "stop" if self.stop_task and not self.stop_task.done() else self.busy,
+                "firmware": self.firmware, "ordered_commands": self.boot_id is not None}
 
     def launch(self, job):
         """Run a link job in the background so a slow network never blocks the bench lock."""
-        if self.task and not self.task.done():
+        if (self.task and not self.task.done()) or (self.stop_task and not self.stop_task.done()) or self.busy:
             raise RuntimeError("busy")
         self.task = asyncio.create_task(job)
         return self.task
 
     def _client(self):
         if self.client is None:
-            self.client = httpx.AsyncClient(base_url=self.url, timeout=REQUEST_TIMEOUT_S, transport=self.transport)
+            self.client = httpx.AsyncClient(base_url=self.url, timeout=REQUEST_TIMEOUT_S, transport=self.transport, trust_env=False)
         return self.client
 
     def _apply(self, status):
         """Copy a firmware status object in; returns True if anything changed."""
-        if not isinstance(status, dict) or not isinstance(status.get("state"), str):
+        if not isinstance(status, dict) or status.get("state") not in {"relaxed", "holding", "moving", "sequence"}:
             raise ValueError("The scooper sent a status without a state.")
+        if status.get("servo_ready") is False:
+            raise ValueError("Scooper servo PWM initialization failed; inspect GPIO41/42 and restart the S3.")
+        boot, sequence = status.get("boot_id"), status.get("command_seq")
+        if status.get("api") == 2 or self.boot_id is not None:
+            if type(boot) is not int or not 1 <= boot <= 0xFFFFFFFF or type(sequence) is not int or not 0 <= sequence <= 0xFFFFFFFF:
+                raise BoardRestarted("Scooper protocol changed; press Reconnect.")
+            if self.boot_id is not None and boot != self.boot_id:
+                raise BoardRestarted("Scooper restarted; press Reconnect before sending another command.")
+            if sequence < self.reported_sequence:
+                return False  # A delayed poll/command response cannot overwrite a newer STOP.
+            self.boot_id, self.reported_sequence = boot, sequence
+            self.command_sequence = max(self.command_sequence, sequence)
+        self.firmware = status.get("firmware")
         angles = status.get("angles") if isinstance(status.get("angles"), dict) else {}
         angles = {str(name): int(value) for name, value in angles.items()
-                  if isinstance(value, (int, float)) and not isinstance(value, bool)}
+                  if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and 0 <= value <= 180}
+        if not all(name in angles for name in ("left", "right")):
+            raise ValueError("Scooper status is missing valid commanded angles.")
         new = (status["state"], status.get("sequence"), status.get("step"), angles)
         changed = new != (self.state, self.sequence, self.step, self.angles)
         self.state, self.sequence, self.step, self.angles = new
-        return changed
+        previous_error = self.error
+        if status.get("watchdog_stopped"):
+            self.error = "Scooper stopped after losing controller contact. Check the link before moving again."
+        return changed or previous_error != self.error
 
     async def connect(self):
         await self.close()
@@ -81,6 +112,10 @@ class ScooperLink:
             response = await self._client().get("/status")
             response.raise_for_status()
             self._apply(response.json())
+            if self.state in {"moving", "sequence"}:
+                result = await self.command("stop")
+                if result is not True:
+                    raise ConnectionError("Scooper did not accept the reconnect STOP: " + str(result))
             self.status = "ready"
             self.poller = asyncio.create_task(self._poll())
         except Exception as exc:
@@ -94,16 +129,28 @@ class ScooperLink:
     async def command(self, name):
         if name not in COMMANDS:
             raise ValueError(name)
-        if not self.ready:
+        if not self.ready and not (name == "stop" and self.client is not None):
             raise ConnectionError("The scooper Wi-Fi link is not connected.")
+        if name != "stop" and self.stop_task and not self.stop_task.done():
+            raise ConnectionError("Scooper STOP is still in progress.")
+        self.command_sequence += 1
+        request_sequence, generation = self.command_sequence, self.generation
+        if request_sequence > 0xFFFFFFFF:
+            raise ConnectionError("Scooper command counter exhausted; restart the S3 and reconnect.")
+        params = {"name": name}
+        if self.boot_id is not None:
+            params.update(boot=self.boot_id, seq=request_sequence)
         self.busy = name
+        self.busy_request = request_sequence
         self.on_change()
         try:
             try:
-                response = await self._client().post("/command", params={"name": name})
+                response = await self._client().post("/command", params=params)
                 body = response.json()
             except (httpx.HTTPError, ValueError) as exc:
                 raise ConnectionError(f"The scooper did not answer '{name}' ({describe(exc)}).") from exc
+            if generation != self.generation and name != "stop":
+                return "canceled by STOP"
             if isinstance(body, dict) and isinstance(body.get("status"), dict):
                 self._apply(body["status"])
             if response.status_code == 200 and isinstance(body, dict) and body.get("ok") is True:
@@ -117,8 +164,31 @@ class ScooperLink:
             self.status, self.error, self.state = "error", str(exc), None
             raise
         finally:
-            self.busy = None
+            if request_sequence == self.busy_request:
+                self.busy = None
+                self.busy_request = None
             self.on_change()
+
+    def request_stop(self):
+        """Cancel queued/in-flight motion, then send a newer ordered STOP once."""
+        self.generation += 1
+        if self.stop_task and not self.stop_task.done():
+            return self.stop_task
+        pending = self.task if self.task and not self.task.done() and self.task is not asyncio.current_task() else None
+        if pending:
+            pending.cancel()
+        async def finish():
+            try:
+                if pending:
+                    await asyncio.gather(pending, return_exceptions=True)
+                return await self.command("stop")
+            finally:
+                self.busy = None
+                self.on_change()
+        self.stop_task = asyncio.create_task(finish())
+        self.stop_task.add_done_callback(lambda _task: self.on_change())
+        self.on_change()
+        return self.stop_task
 
     async def _poll(self):
         missed = 0
@@ -130,6 +200,11 @@ class ScooperLink:
                 changed = self._apply(response.json())
             except asyncio.CancelledError:
                 raise
+            except BoardRestarted as exc:
+                self.status, self.state, self.error = "error", None, str(exc)
+                self.poller = None
+                self.on_change()
+                return
             except Exception as exc:
                 missed += 1
                 if missed >= MAX_MISSED_POLLS:
@@ -150,10 +225,15 @@ class ScooperLink:
             await asyncio.gather(poller, return_exceptions=True)
 
     async def close(self):
+        if self.stop_task and self.stop_task is not asyncio.current_task():
+            await asyncio.gather(self.stop_task, return_exceptions=True)
+        self.stop_task = None
         await self._stop_polling()
         client, self.client = self.client, None
         if client is not None:
             await client.aclose()
         self.state = None
+        self.boot_id = self.firmware = None
+        self.command_sequence = self.reported_sequence = 0
         if self.status in {"ready", "connecting"}:
             self.status = "disconnected"

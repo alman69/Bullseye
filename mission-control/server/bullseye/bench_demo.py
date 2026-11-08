@@ -305,11 +305,13 @@ class BenchControl:
         task = asyncio.create_task(stop_request())
         self.stop_jobs.add(task)
         task.add_done_callback(self.stop_jobs.discard)
-        if latched and self.scooper.ready:
+        if latched and (self.scooper.ready or self.scooper.client is not None):
             # A real STOP also freezes the sticks where they are (they keep holding).
+            stop = self.scooper.request_stop()  # Fence queued motion before releasing the bench lock.
             async def scooper_stop():
                 try:
-                    await self.scooper.command("stop")
+                    if await stop is not True:
+                        self.log("Scooper refused STOP; inspect its reported state.", "warning")
                 except Exception:
                     self.log("Scooper STOP was not acknowledged; check the scooper.", "warning")
             job = asyncio.create_task(scooper_stop())
@@ -521,6 +523,8 @@ class BenchControl:
                 task.cancel()
         await asyncio.gather(*(task for task in (self.watchdog, self.operation, self.telemetry_task) if task), return_exceptions=True)
         await self.bridge.stop()
+        if self.scooper.ready:
+            await asyncio.gather(self.scooper.request_stop(), return_exceptions=True)
         await self.bridge.close()
         await asyncio.gather(*self.stop_jobs, return_exceptions=True)
         if self.scooper.task:

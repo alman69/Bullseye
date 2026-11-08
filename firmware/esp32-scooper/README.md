@@ -1,5 +1,11 @@
 # Bullseye scooper
 
+**Using the touchscreen S3 for both jobs?** Upload the
+[combined single-file companion sketch](../esp32-companion/README.md) instead.
+It preserves the full-screen animated face/BLE telemetry and adds these scooper
+controls to the same `/bench` UI. The original standalone sketch below remains
+available for reference and servo-only testing.
+
 Two SG90 servos swing popsicle sticks together to squeeze an ore block up. The
 firmware runs on the **separate ESP32-S3 board that also drives the 3.1" IPS
 touchscreen** (see `firmware/esp32-display`). It does not run on either rover

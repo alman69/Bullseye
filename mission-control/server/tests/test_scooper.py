@@ -201,3 +201,140 @@ async def test_bench_stop_also_freezes_the_scooper(scooper_bench):
     await settle(bench)
     await wait_for(lambda: "stop" in fake.commands)
     assert fake.commands[-1] == "stop"
+
+
+class OrderedScooper(FakeScooper):
+    """Combined firmware protocol: board epoch plus increasing command IDs."""
+    def __init__(self):
+        super().__init__()
+        self.boot = 123
+        self.counter = 0
+        self.rejected = []
+        self.servo_ready = True
+
+    def status(self):
+        return {**super().status(), "firmware": "bullseye-companion", "api": 2,
+                "boot_id": self.boot, "command_seq": self.counter, "servo_ready": self.servo_ready}
+
+    def __call__(self, request):
+        if request.method == "POST":
+            sequence = int(request.url.params["seq"])
+            if int(request.url.params["boot"]) != self.boot or sequence <= self.counter:
+                self.rejected.append(request.url.params["name"])
+                return httpx.Response(409, json={"ok": False, "error": "old command or board restarted; reconnect", "status": self.status()})
+            self.counter = sequence
+        return super().__call__(request)
+
+
+async def test_combined_firmware_uses_ordered_commands_and_discards_old_status():
+    fake = OrderedScooper(); link = link_for(fake)
+    try:
+        await link.connect()
+        assert link.snapshot()["ordered_commands"] and link.snapshot()["firmware"] == "bullseye-companion"
+        await link.command("squeeze")
+        old = fake.status()
+        await link.command("stop")
+        assert fake.counter == 2 and link.state == "holding"
+        assert link._apply(old) is False and link.state == "holding"
+    finally:
+        await link.close()
+
+
+async def test_stop_cancels_inflight_request_and_late_squeeze_is_rejected():
+    fake = OrderedScooper(); sent = asyncio.Event(); deliver_late = asyncio.Event(); late = []
+    async def transport(request):
+        if request.method == "POST" and request.url.params["name"] == "squeeze":
+            sent.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                async def network_packet_already_sent():
+                    await deliver_late.wait()
+                    return fake(request)
+                late.append(asyncio.create_task(network_packet_already_sent()))
+                raise
+        return fake(request)
+    link = ScooperLink(transport=httpx.MockTransport(transport))
+    try:
+        await link.connect()
+        link.launch(link.command("squeeze"))
+        await sent.wait()
+        stop = link.request_stop()
+        assert link.snapshot()["busy"] == "stop"
+        with pytest.raises(RuntimeError):
+            job = link.command("home")
+            try: link.launch(job)
+            finally: job.close()
+        assert await stop is True
+        deliver_late.set()
+        assert (await late[0]).status_code == 409
+        assert fake.commands == ["stop"] and fake.rejected == ["squeeze"]
+        assert link.state == "holding" and link.snapshot()["busy"] is None
+    finally:
+        deliver_late.set()
+        await asyncio.gather(*late, return_exceptions=True)
+        await link.close()
+
+
+async def test_stop_before_a_queued_job_runs_never_sends_motion():
+    fake = OrderedScooper(); link = link_for(fake)
+    try:
+        await link.connect()
+        link.launch(link.command("squeeze"))
+        assert await link.request_stop() is True
+        assert fake.commands == ["stop"]
+    finally:
+        await link.close()
+
+
+async def test_board_restart_requires_reconnect_and_never_replays_command():
+    fake = OrderedScooper(); link = link_for(fake)
+    try:
+        await link.connect()
+        fake.boot += 1
+        with pytest.raises(ConnectionError, match="restarted"):
+            await link.command("home")
+        assert not link.ready and fake.commands == []
+        await link.connect()
+        assert fake.commands == []
+        assert await link.command("home") is True
+        assert fake.commands == ["home"]
+    finally:
+        await link.close()
+
+
+async def test_watchdog_response_does_not_leave_busy_stuck():
+    fake = OrderedScooper()
+    def transport(request):
+        response = fake(request)
+        if request.method == "POST":
+            fake.counter += 1  # The local watchdog fenced a queued request.
+            return httpx.Response(409, json={"ok": False, "error": "old command", "status": fake.status()})
+        return response
+    link = ScooperLink(transport=httpx.MockTransport(transport))
+    try:
+        await link.connect()
+        assert await link.command("home") == "old command"
+        assert link.command_sequence == 2 and link.busy is None
+    finally:
+        await link.close()
+
+
+async def test_pwm_failure_does_not_enable_scooper_controls():
+    fake = OrderedScooper(); fake.servo_ready = False
+    link = link_for(fake)
+    await link.connect()
+    assert not link.ready and "PWM initialization failed" in link.error
+    assert fake.commands == []
+    await link.close()
+
+
+async def test_connect_stops_existing_motion_instead_of_continuing_it():
+    fake = OrderedScooper()
+    fake.state, fake.sequence, fake.step = "sequence", "squeeze", "out"
+    link = link_for(fake)
+    try:
+        await link.connect()
+        assert link.ready and link.state == "holding" and fake.commands == ["stop"]
+    finally:
+        await link.close()

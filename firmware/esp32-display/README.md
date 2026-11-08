@@ -1,5 +1,9 @@
 # Bullseye standalone BLE display
 
+For display **and** scooper on this same S3, use the
+[combined single-file firmware](../esp32-companion/README.md). This original
+display-only sketch is preserved as a separate baseline.
+
 Open `bullseye_display/bullseye_display.ino` in Arduino IDE. This is firmware for
 the **separate ESP32-S3 touchscreen**, not either board on the ELEGOO rover.
 
