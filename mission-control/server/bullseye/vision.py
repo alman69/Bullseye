@@ -27,6 +27,9 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlparse
+
+import httpx
 
 from .config import Settings
 from .mission import CommandError
@@ -38,9 +41,15 @@ TUNABLE = {
     "detector.min_area_px": (int, 10, 5000),
     "classifier.max_distance": (float, 1.0, 12.0),
     "navigation.aim_deadband": (float, 0.02, 0.4),
-    "navigation.arrive_distance_cm": (float, 5.0, 100.0),
+    "navigation.arrive_distance_cm": (float, 2.0, 100.0),
     "navigation.approach_zone_y": (float, 0.0, 0.3),
+    "navigation.search_turn_ms": (int, 100, 1000),
+    "navigation.avoid_turn_ms": (int, 100, 1000),
 }
+# Camera sensor settings sent to the ESP32's /control endpoint (runtime only, reset on power-off;
+# no firmware change). Under the floodlight: more saturation and less exposure keep colors visible.
+CAMERA_CONTROLS = {"saturation": (-2, 2), "ae_level": (-2, 2), "brightness": (-2, 2), "contrast": (-2, 2)}
+CAMERA_GAP_S = 3.0      # frames missing this long = camera may have restarted: re-send the settings
 STEP_DURATIONS = ("200", "500", "1000")
 # The shared code always comes from this repository; settings.vision_dir only chooses
 # where calibration data (config.json, color_model.json, captures/) is read and written.
@@ -75,6 +84,11 @@ class VisionService:
         self.ground_captures: list = []         # [{"distance_cm", "bottom_y", "width"}]
         self.fov_captures: dict = {}            # {"center": error, "side": error}
         self._times: deque = deque(maxlen=30)
+        self._last_frame_at = 0.0
+        self._camera_busy = False
+        parsed = urlparse(settings.camera_url) if settings.camera_url else None
+        self.control_url = f"{parsed.scheme}://{parsed.hostname}/control" if parsed and parsed.hostname else None
+        self.camera_status = {"ok": None, "message": "Not sent yet.", "at": None}
         self._image = self._prepared = self._det = None
         try:
             self.v = _import_vision()
@@ -135,6 +149,10 @@ class VisionService:
             while True:
                 jpeg = await queue.get()
                 seq = self.camera.sequence
+                now = time.monotonic()
+                if now - self._last_frame_at > CAMERA_GAP_S:      # first frame, or the stream came back
+                    self._schedule_camera_apply()
+                self._last_frame_at = now
                 try:
                     result = await asyncio.to_thread(self._process, jpeg, seq)
                 except Exception as error:
@@ -196,11 +214,39 @@ class VisionService:
             "nav": {"state": self.nav.planner.state,
                     "action": action.to_dict() if action else None,
                     "label": action.label() if action else None},
+            "mask_boxes": self.detector.ignore_boxes,
             "lines": {"stop": stop,
                       "zone": None if stop is None else round(stop - self.cfg["navigation"]["approach_zone_y"], 4),
                       "horizon": ground.get("horizon_y")},
             "wb": None if self.detector.wb is None else [round(float(g), 3) for g in self.detector.wb.gains],
         }
+
+    # ------------------------------------------------------------ camera settings
+    def _controls(self) -> dict:
+        return dict(self.cfg["camera"].get("controls") or {})
+
+    def _schedule_camera_apply(self) -> None:
+        if self.control_url and self._controls() and not self._camera_busy:
+            self._camera_busy = True
+            task = asyncio.create_task(asyncio.to_thread(self._apply_camera))
+            task.add_done_callback(lambda _t: setattr(self, "_camera_busy", False))
+
+    def _apply_camera(self) -> None:
+        controls = self._controls()
+        if not self.control_url:
+            self.camera_status = {"ok": None, "message": "No real camera configured (simulation): settings saved, not sent.",
+                                  "at": datetime.now().strftime("%H:%M:%S")}
+            return
+        failed = []
+        for var, val in controls.items():
+            try:
+                httpx.get(self.control_url, params={"var": var, "val": val}, timeout=2).raise_for_status()
+            except httpx.HTTPError as error:
+                failed.append(f"{var} ({type(error).__name__})")
+        sent = ", ".join(f"{k}={v}" for k, v in controls.items()) or "nothing to send"
+        self.camera_status = {"ok": not failed,
+                              "message": f"Camera not updated: {', '.join(failed)}" if failed else f"Camera set: {sent}",
+                              "at": datetime.now().strftime("%H:%M:%S")}
 
     # ------------------------------------------------------------ state
     def summary(self) -> dict:
@@ -215,6 +261,9 @@ class VisionService:
             "available": True, "error": self.error, "dry_run": True,
             "target": self.target, "mode": self.detector.mode,
             "classes": list(model.classes) if model else [],
+            "model_fitted": model is not None,
+            "camera": {"controls": self._controls(), "url_set": bool(self.control_url), **self.camera_status},
+            "rover_mask": {"boxes": self.detector.ignore_boxes},
             "detected": bool(det.get("detected")), "direction": det.get("direction"),
             "horizontal_error": det.get("horizontal_error"), "distance_cm_est": det.get("distance_cm_est"),
             "nav_state": nav.get("state"), "nav_label": nav.get("label"),
@@ -243,6 +292,8 @@ class VisionService:
         if handler is None:
             raise CommandError("Unknown vision command.")
         await asyncio.to_thread(self._locked, handler, payload)
+        if kind == "vision_camera":           # network I/O outside the lock so frames keep flowing
+            await asyncio.to_thread(self._apply_camera)
 
     def _locked(self, handler, payload):
         with self.lock:
@@ -313,7 +364,8 @@ class VisionService:
         cc = self.cfg["classifier"]
         try:
             model = self.v.colorclass.ColorModel.fit(self.samples, cc.get("max_distance", 4.0),
-                                                     cc.get("regularization", 4.0), cc.get("floor_class", "floor"))
+                                                     cc.get("regularization", 4.0), cc.get("floor_class", "floor"),
+                                                     min_chroma=cc.get("min_chroma", 12.0))
         except ValueError as error:
             raise CommandError(str(error)) from None
         model.save(self.model_path)
@@ -429,6 +481,49 @@ class VisionService:
             self.cfg["ground"]["stop_line_y"] = model.row_for_distance(float(value))
         self._reload()
         self.message = f"{key} = {kind(value)}"
+
+    def _cmd_camera(self, p):
+        key, value = p.get("key"), p.get("value")
+        if key not in CAMERA_CONTROLS:
+            raise CommandError("Unknown camera setting.")
+        lo, hi = CAMERA_CONTROLS[key]
+        if not isinstance(value, int) or isinstance(value, bool) or not lo <= value <= hi:
+            raise CommandError(f"{key} must be a whole number from {lo} to {hi}.")
+        self.cfg["camera"].setdefault("controls", {})[key] = value
+        self._reload()
+        self.message = f"Camera {key} = {value}"
+
+    def _box(self, p) -> list:
+        box = p.get("box")
+        if not (isinstance(box, list) and len(box) == 4 and all(
+                isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in box)):
+            raise CommandError("Box must be [x0, y0, x1, y1] between 0 and 1.")
+        x0, x1 = sorted(min(1.0, max(0.0, float(v))) for v in (box[0], box[2]))
+        y0, y1 = sorted(min(1.0, max(0.0, float(v))) for v in (box[1], box[3]))
+        if x1 - x0 < 0.005 or y1 - y0 < 0.005:
+            raise CommandError("Drag a bigger box.")
+        return [round(x0, 4), round(y0, 4), round(x1, 4), round(y1, 4)]
+
+    def _cmd_mask_add(self, p):
+        boxes = self.cfg.setdefault("rover_mask", {"boxes": []}).setdefault("boxes", [])
+        if len(boxes) >= 12:
+            raise CommandError("Up to 12 mask boxes; clear some first.")
+        boxes.append(self._box(p))
+        self._reload()
+        self.message = f"Rover mask: {len(boxes)} box(es)."
+
+    def _cmd_mask_undo(self, p):
+        boxes = self.cfg.get("rover_mask", {}).get("boxes", [])
+        if not boxes:
+            raise CommandError("No mask boxes to undo.")
+        boxes.pop()
+        self._reload()
+        self.message = f"Rover mask: {len(boxes)} box(es)."
+
+    def _cmd_mask_clear(self, p):
+        self.cfg["rover_mask"] = {"boxes": []}
+        self._reload()
+        self.message = "Rover mask cleared."
 
     def _cmd_snapshot(self, p):
         import cv2

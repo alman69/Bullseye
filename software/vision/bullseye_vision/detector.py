@@ -143,7 +143,7 @@ def direction_for(error: float, deadband: float) -> str:
 
 class ColorDetector:
     def __init__(self, ranges: dict, settings: DetectorSettings | None = None,
-                 model=None, white_balance=None, ground=None):
+                 model=None, white_balance=None, ground=None, ignore_boxes=None):
         self.ranges = {name: (r if isinstance(r, HsvRange) else HsvRange.from_dict(r)) for name, r in ranges.items()}
         self.settings = settings or DetectorSettings()
         k = self.settings.morph_kernel
@@ -151,6 +151,10 @@ class ColorDetector:
         self.model = model                  # colorclass.ColorModel or None (HSV mode)
         self.wb = white_balance             # colorclass.WhiteBalance or None
         self.ground = ground                # ground.GroundModel or None
+        # Rover mask: normalized [x0, y0, x1, y1] boxes over parts of the rover itself (e.g. the
+        # gripper) that are always in view. Ignored for colors and treated as floor by the floor check.
+        self.ignore_boxes = [list(map(float, b)) for b in (ignore_boxes or [])]
+        self._ignore_cache = (None, None)
 
     @classmethod
     def from_config(cls, cfg: dict, base_dir=None, mode: str | None = None) -> "ColorDetector":
@@ -167,7 +171,8 @@ class ColorDetector:
             model = ColorModel.load(model_path)
         ground = GroundModel.from_dict(cfg.get("ground"))
         det = cls(cfg["colors"], DetectorSettings.from_dict(cfg["detector"]),
-                  ground=ground if ground.calibrated else None)
+                  ground=ground if ground.calibrated else None,
+                  ignore_boxes=cfg.get("rover_mask", {}).get("boxes", []))
         det.set_model(model, cc)
         return det
 
@@ -202,6 +207,26 @@ class ColorDetector:
         idx = self.model.index(name)
         return None if idx is None else (prepared.labels == idx).astype(np.uint8) * 255
 
+    def ignore_mask(self, shape):
+        """0/255 mask of the rover-mask boxes for a frame of this shape, or None if there are none."""
+        if not self.ignore_boxes:
+            return None
+        h, w = shape[:2]
+        key = (h, w, tuple(tuple(b) for b in self.ignore_boxes))
+        if self._ignore_cache[0] != key:
+            m = np.zeros((h, w), np.uint8)
+            for x0, y0, x1, y1 in self.ignore_boxes:
+                m[int(round(y0 * h)):int(round(y1 * h)), int(round(x0 * w)):int(round(x1 * w))] = 255
+            self._ignore_cache = (key, m)
+        return self._ignore_cache[1]
+
+    def _without_ignored(self, m: np.ndarray) -> np.ndarray:
+        ignore = self.ignore_mask(m.shape)
+        if ignore is not None:
+            m = m.copy()
+            m[ignore > 0] = 0
+        return m
+
     @property
     def colors(self) -> tuple:
         return tuple(self.ranges)
@@ -224,7 +249,7 @@ class ColorDetector:
             if self._kernel is not None:
                 m = cv2.morphologyEx(m, cv2.MORPH_OPEN, self._kernel)
                 m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, self._kernel)
-            return m
+            return self._without_ignored(m)
         rng = self._range(color)
         hsv = self.to_hsv(frame_bgr) if hsv is None else hsv
         lo_sv = (rng.s[0], rng.v[0])
@@ -237,7 +262,7 @@ class ColorDetector:
         if self._kernel is not None:
             m = cv2.morphologyEx(m, cv2.MORPH_OPEN, self._kernel)
             m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, self._kernel)
-        return m
+        return self._without_ignored(m)
 
     def candidates(self, mask: np.ndarray) -> list:
         """Contours that pass the size/shape filters, largest first."""

@@ -14,6 +14,7 @@ import ground_calib
 from bullseye_vision.config import DEFAULT_CONFIG_PATH, load_config
 from bullseye_vision.detector import ColorDetector
 from bullseye_vision.ground import GroundModel
+from support import clean_config
 
 HORIZON, A, K = 0.35, 6.0, 2.5           # synthetic pinhole camera: y = horizon + A/d, width = K/d
 
@@ -106,7 +107,7 @@ class CalibScriptTests(unittest.TestCase):
 
 class DetectorGroundTests(unittest.TestCase):
     def test_ground_filters_and_distance(self):
-        cfg = load_config()
+        cfg = clean_config()
         det = ColorDetector.from_config(cfg, mode="hsv")
         det.ground = GroundModel.fit(SAMPLES)
         img = np.full((600, 800, 3), 110, np.uint8)

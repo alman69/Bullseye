@@ -1,7 +1,6 @@
 """Vision service inside Mission Control: processing, calibration commands and API."""
 import asyncio
 import json
-import shutil
 import time
 
 import cv2
@@ -20,7 +19,11 @@ from bullseye.vision import PACKAGE_DIR, VisionService
 @pytest.fixture
 def vision_dir(tmp_path):
     """Isolated calibration folder: a copy of the repo's vision config, no color model."""
-    shutil.copy(PACKAGE_DIR / "config.json", tmp_path / "config.json")
+    cfg = json.loads((PACKAGE_DIR / "config.json").read_text())
+    cfg["camera"]["controls"] = {}                     # start from a blank calibration, not the arena's
+    cfg["rover_mask"] = {"boxes": []}
+    cfg["classifier"]["mode"] = "auto"
+    (tmp_path / "config.json").write_text(json.dumps(cfg))
     return tmp_path
 
 
@@ -215,3 +218,40 @@ def test_vision_disabled_by_default():
     with TestClient(app) as client:
         assert client.get("/api/state").json()["vision"] is None
         assert client.get("/api/vision/state").status_code == 404
+
+
+def test_rover_mask_commands_and_frame(vision_dir):
+    svc = service(vision_dir)
+    run(svc, "vision_mask_add", {"box": [0.05, 0.8, 0.35, 1.0]})
+    run(svc, "vision_mask_add", {"box": [0.95, 1.0, 0.6, 0.8]})          # corners in any order
+    assert svc.summary()["rover_mask"]["boxes"] == [[0.05, 0.8, 0.35, 1.0], [0.6, 0.8, 0.95, 1.0]]
+    assert svc._process(arena(), 1)["mask_boxes"] == svc.summary()["rover_mask"]["boxes"]
+    run(svc, "vision_mask_undo")
+    assert len(svc.summary()["rover_mask"]["boxes"]) == 1
+    run(svc, "vision_mask_clear")
+    assert svc.summary()["rover_mask"]["boxes"] == []
+    for bad in ({"box": [0, 0, 0.001, 0.001]}, {"box": "x"}):
+        with pytest.raises(CommandError):
+            run(svc, "vision_mask_add", bad)
+
+
+def test_camera_settings_validated_saved_and_sent(vision_dir, monkeypatch):
+    sent = []
+
+    class Reply:
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(vision_module.httpx, "get", lambda url, params, timeout: sent.append((url, params)) or Reply())
+    svc = VisionService(Settings(vision_enabled=True, vision_dir=vision_dir,
+                                 camera_url="http://192.168.4.1:81/stream"), CameraHub(Settings()))
+    run(svc, "vision_camera", {"key": "saturation", "value": 2})
+    assert sent[-1] == ("http://192.168.4.1/control", {"var": "saturation", "val": 2})
+    assert svc.summary()["camera"]["ok"] is True
+    assert json.loads((vision_dir / "config.json").read_text())["camera"]["controls"] == {"saturation": 2}
+    for bad in ({"key": "saturation", "value": 3}, {"key": "framesize", "value": 1}, {"key": "ae_level", "value": 0.5}):
+        with pytest.raises(CommandError):
+            run(svc, "vision_camera", bad)
+    sim = service(vision_dir)                                               # no real camera: saved, not sent
+    run(sim, "vision_camera", {"key": "ae_level", "value": -1})
+    assert "not sent" in sim.summary()["camera"]["message"]

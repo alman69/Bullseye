@@ -52,6 +52,7 @@ describe("VisionCalibration", () => {
     const act = vi.fn().mockResolvedValue(true);
     const view = ui();
     render(<VisionCalibration vision={summary} ui={view} canAct act={act} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Colors/ }));
     fireEvent.click(screen.getByRole("button", { name: /Floor/ }));
     expect(view.setSamplingClass).toHaveBeenCalledWith("floor");
     fireEvent.click(screen.getByRole("button", { name: "Fit color model" }));
@@ -74,7 +75,32 @@ describe("VisionCalibration", () => {
 
   it("disables editing for viewers", () => {
     render(<VisionCalibration vision={summary} ui={ui()} canAct={false} act={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Colors/ }));
     expect((screen.getByRole("button", { name: "Fit color model" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("clears all samples after confirmation", () => {
+    const act = vi.fn().mockResolvedValue(true);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<VisionCalibration vision={summary} ui={ui()} canAct act={act} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Colors/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear all samples" }));
+    expect(act).toHaveBeenCalledWith("vision_clear_samples", {});
+  });
+
+  it("warns when samples exist but no model is fitted", () => {
+    render(<VisionCalibration vision={{ ...summary, model_fitted: false }} ui={ui()} canAct act={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Colors/ }));
+    expect(screen.getByRole("alert").textContent).toMatch(/not fitted yet/);
+  });
+
+  it("starts with camera settings and draws rover-mask boxes", () => {
+    const view = ui();
+    render(<VisionCalibration vision={{ ...summary, camera: { controls: {}, url_set: true, ok: null, message: "Not sent yet.", at: null } }} ui={view} canAct act={vi.fn()} />);
+    expect(screen.getByText(/Color saturation/)).toBeTruthy();                 // camera tab is first
+    fireEvent.click(screen.getByRole("tab", { name: /Rover mask/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Draw mask boxes" }));
+    expect(view.setSamplingClass).toHaveBeenCalledWith("__rover_mask__");
   });
 });
 

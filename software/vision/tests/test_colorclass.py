@@ -1,6 +1,7 @@
 """Classifier + white balance tests, using colors measured on the real arena (2026-11-07)."""
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,8 +10,8 @@ import cv2
 import numpy as np
 
 from bullseye_vision.colorclass import UNKNOWN, ColorModel, WhiteBalance, format_confusion, load_samples, save_samples
-from bullseye_vision.config import load_config
 from bullseye_vision.detector import ColorDetector
+from support import clean_config
 
 # OpenCV HSV values measured in the arena snapshots.
 MEASURED_HSV = {
@@ -46,7 +47,9 @@ class ColorModelTests(unittest.TestCase):
     def test_confusing_pairs_separate(self):
         conf = self.model.confusion(self.samples)
         for name in MEASURED_HSV:
-            self.assertGreater(conf[name][name], 0.9, f"{name}: {conf[name]}")
+            # The color gate may move up to 20% of a mineral's dullest sample pixels to the background.
+            floor = 0.78 if name in ("red", "green", "blue", "yellow") else 0.9
+            self.assertGreater(conf[name][name], floor, f"{name}: {conf[name]}")
         self.assertLess(conf["red"]["obstacle"], 0.02)
         self.assertLess(conf["obstacle"]["red"], 0.02)
         self.assertLess(conf["yellow"]["cardboard"], 0.02)
@@ -97,6 +100,22 @@ def arena_frame(cast=(1.0, 1.0, 1.0)):
     return out
 
 
+class ColorGateTests(unittest.TestCase):
+    def test_tinted_floor_is_not_a_mineral(self):
+        """Floodlit floor with a warm or bluish tint must never count as red or blue, while real balls still do."""
+        samples = make_samples()
+        model = ColorModel.fit(samples)
+        self.assertEqual(set(model.gates), {"red", "green", "blue", "yellow"})
+        warm_floor = np.full((20, 20, 3), hsv_to_bgr(176, 45, 200), np.uint8)    # floor, slightly pink
+        blue_floor = np.full((20, 20, 3), hsv_to_bgr(100, 30, 190), np.uint8)    # floor, slightly blue
+        for patch, mineral in ((warm_floor, "red"), (blue_floor, "blue")):
+            self.assertFalse((model.labels(patch) == model.index(mineral)).any(), mineral)
+        for name in ("red", "green", "blue", "yellow"):
+            self.assertGreater(model.confusion(samples)[name][name], 0.8, name)
+        again = ColorModel.from_dict(json.loads(json.dumps(model.to_dict())))
+        self.assertEqual(again.gates.keys(), model.gates.keys())
+
+
 class WhiteBalanceTests(unittest.TestCase):
     def test_corrects_color_cast(self):
         model = ColorModel.fit(make_samples())
@@ -115,7 +134,7 @@ class WhiteBalanceTests(unittest.TestCase):
 
 class DetectorIntegrationTests(unittest.TestCase):
     def test_classifier_finds_pale_cube_hsv_misses_it(self):
-        cfg = load_config()
+        cfg = clean_config()
         frame = arena_frame()
         hsv_det = ColorDetector.from_config(cfg, mode="hsv")
         self.assertFalse(hsv_det.detect(frame, "red").detected)          # S 80 < HSV red s_min 120
@@ -128,7 +147,7 @@ class DetectorIntegrationTests(unittest.TestCase):
         self.assertEqual(det.mode, "classifier")
 
     def test_classifier_under_color_cast(self):
-        cfg = load_config()
+        cfg = clean_config()
         det = ColorDetector.from_config(cfg, mode="hsv")
         det.settings.min_area_px = 200
         det.set_model(ColorModel.fit(make_samples()), cfg["classifier"])
@@ -137,7 +156,7 @@ class DetectorIntegrationTests(unittest.TestCase):
         self.assertAlmostEqual(result.center_x, 197, delta=4)
 
     def test_floor_class_mask(self):
-        cfg = load_config()
+        cfg = clean_config()
         det = ColorDetector.from_config(cfg, mode="hsv")
         det.set_model(ColorModel.fit(make_samples()), cfg["classifier"])
         prepared = det.prepare(arena_frame())

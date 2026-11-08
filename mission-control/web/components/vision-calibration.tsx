@@ -1,14 +1,17 @@
 import { useState } from "react";
-import { Crosshair, Ruler, ScanEye, Settings2, Footprints } from "lucide-react";
+import { Aperture, Crosshair, Footprints, Ruler, ScanEye, Settings2, SquareDashed } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { VisionUi } from "@/hooks/use-vision-ui";
-import { CLASS_HEX, SAMPLE_CLASSES, TUNING, type VisionSummary } from "@/lib/vision";
+import { CAMERA_TUNING, CLASS_HEX, MASK_TOOL, SAMPLE_CLASSES, TUNING, type VisionSummary } from "@/lib/vision";
 
 type Act = (type: string, payload?: Record<string, unknown>) => Promise<boolean>;
-type Tab = "colors" | "stop" | "fov" | "steps" | "tuning";
+type Tab = "camera" | "mask" | "colors" | "stop" | "fov" | "steps" | "tuning";
 
+// In the order to do them: camera settings change colors, so set them (and the mask) before sampling.
 const TABS: { id: Tab; label: string; icon: typeof Crosshair }[] = [
-  { id: "colors", label: "Colors", icon: ScanEye },
+  { id: "camera", label: "1 Camera", icon: Aperture },
+  { id: "mask", label: "2 Rover mask", icon: SquareDashed },
+  { id: "colors", label: "3 Colors", icon: ScanEye },
   { id: "stop", label: "Stop line", icon: Ruler },
   { id: "fov", label: "Field of view", icon: Crosshair },
   { id: "steps", label: "Steps", icon: Footprints },
@@ -27,7 +30,7 @@ export function VisionCalibration({
   canAct: boolean;
   act: Act;
 }) {
-  const [tab, setTab] = useState<Tab>("colors");
+  const [tab, setTab] = useState<Tab>("camera");
   if (!vision?.available) return null;
   return (
     <section className="panel vision-calibration" aria-label="Vision calibration">
@@ -44,7 +47,7 @@ export function VisionCalibration({
             className={tab === id ? "active" : ""}
             onClick={() => {
               setTab(id);
-              if (id !== "colors") ui.setSamplingClass(null);
+              if (id !== "colors" && id !== "mask") ui.setSamplingClass(null);
             }}
           >
             <Icon size={13} /> {label}
@@ -52,6 +55,8 @@ export function VisionCalibration({
         ))}
       </div>
       <div className="vision-tab-body" role="tabpanel">
+        {tab === "camera" && <CameraTab key={JSON.stringify(vision.camera?.controls)} vision={vision} canAct={canAct} act={act} />}
+        {tab === "mask" && <MaskTab vision={vision} ui={ui} canAct={canAct} act={act} />}
         {tab === "colors" && <ColorsTab vision={vision} ui={ui} canAct={canAct} act={act} />}
         {tab === "stop" && <StopLineTab vision={vision} canAct={canAct} act={act} />}
         {tab === "fov" && <FovTab vision={vision} canAct={canAct} act={act} />}
@@ -63,8 +68,69 @@ export function VisionCalibration({
   );
 }
 
+function CameraTab({ vision, canAct, act }: { vision: VisionSummary; canAct: boolean; act: Act }) {
+  const controls = vision.camera?.controls ?? {};
+  const [draft, setDraft] = useState<Record<string, number>>(controls);
+  return (
+    <div className="vision-tuning">
+      <p className="vision-help">
+        Set these first: they change the colors the camera sends. Under the floodlight start with <b>saturation +2</b> and{" "}
+        <b>exposure −1</b>, then check the colors look strong in the video. They live in the camera’s memory only and are
+        re-sent automatically when the camera restarts.
+      </p>
+      {CAMERA_TUNING.map((t) => (
+        <label key={t.key} className="vision-slider">
+          <span>{t.label} <b>{draft[t.key] ?? 0}</b></span>
+          <input
+            type="range"
+            min={-2}
+            max={2}
+            step={1}
+            value={draft[t.key] ?? 0}
+            disabled={!canAct}
+            onChange={(e) => setDraft({ ...draft, [t.key]: Number(e.target.value) })}
+            onPointerUp={() => draft[t.key] !== controls[t.key] && void act("vision_camera", { key: t.key, value: draft[t.key] ?? 0 })}
+            onKeyUp={() => draft[t.key] !== controls[t.key] && void act("vision_camera", { key: t.key, value: draft[t.key] ?? 0 })}
+          />
+          <small>{t.hint}</small>
+        </label>
+      ))}
+      <p className={`vision-note ${vision.camera?.ok === false ? "warn-text" : ""}`}>
+        {vision.camera?.message}{vision.camera?.at ? ` (${vision.camera.at})` : ""}
+      </p>
+    </div>
+  );
+}
+
+function MaskTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: VisionUi; canAct: boolean; act: Act }) {
+  const boxes = vision.rover_mask?.boxes ?? [];
+  const drawing = ui.samplingClass === MASK_TOOL;
+  return (
+    <div>
+      <p className="vision-help">
+        Draw boxes over <b>parts of the rover that are always in view</b> (the popsicle-stick gripper and its tape). Vision
+        ignores them for colors, and the floor check treats them as floor, so the claws are never “obstacles” or
+        “blue”. Leave the gap between the claws unmasked: that’s where the mineral ends up.
+      </p>
+      <div className="vision-actions">
+        <Button size="sm" variant={drawing ? "secondary" : "default"} disabled={!canAct} aria-pressed={drawing}
+          onClick={() => ui.setSamplingClass(drawing ? null : MASK_TOOL)}>
+          {drawing ? "Stop drawing" : "Draw mask boxes"}
+        </Button>
+        <Button size="sm" variant="outline" disabled={!canAct || !boxes.length} onClick={() => void act("vision_mask_undo")}>Undo last box</Button>
+        <Button size="sm" variant="outline" disabled={!canAct || !boxes.length} onClick={() => void act("vision_mask_clear")}>Clear mask</Button>
+      </div>
+      <p className="vision-note">
+        {drawing ? "Drag on the video over each claw. " : ""}
+        {boxes.length ? `${boxes.length} box(es) masked (shown shaded on the video).` : "No mask yet."}
+      </p>
+    </div>
+  );
+}
+
 function ColorsTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: VisionUi; canAct: boolean; act: Act }) {
   const counts = vision.sample_counts ?? {};
+  const totalSamples = Object.values(counts).reduce((a, b) => a + b, 0);
   const confusion = vision.confusion;
   const columns = confusion ? Object.keys(Object.values(confusion)[0] ?? {}) : [];
   return (
@@ -73,6 +139,12 @@ function ColorsTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: Vis
         Pick a class, then <b>drag a tight box</b> on the video inside that object. Do 3–5 boxes per class: near and far,
         lit and shadowed. For floor include shadows and the darker bottom corners. Then fit.
       </p>
+      {totalSamples > 0 && !vision.model_fitted && (
+        <p className="vision-warning" role="alert">
+          Samples are collected but <b>not fitted yet</b>: the detector is still using the default HSV colors. Click{" "}
+          <b>Fit color model</b>.
+        </p>
+      )}
       <div className="vision-classes" role="group" aria-label="Sample class">
         {SAMPLE_CLASSES.map((c) => (
           <button
@@ -103,6 +175,18 @@ function ColorsTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: Vis
           onClick={() => void act("vision_clear_samples", { cls: ui.samplingClass })}
         >
           Clear {ui.samplingClass ?? "class"}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!canAct || totalSamples === 0}
+          onClick={() => {
+            if (window.confirm("Delete ALL color samples? Do this after changing camera settings, then sample every class again.")) {
+              void act("vision_clear_samples", {});
+            }
+          }}
+        >
+          Clear all samples
         </Button>
         <label className="vision-select">
           Detector

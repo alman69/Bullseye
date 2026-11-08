@@ -11,13 +11,13 @@ import cv2
 import numpy as np
 
 import main
-from bullseye_vision.config import load_config
 from bullseye_vision.detector import ColorDetector
+from support import clean_config
 
 
 class MainHelperTests(unittest.TestCase):
     def setUp(self):
-        self.det = ColorDetector.from_config(load_config())
+        self.det = ColorDetector.from_config(clean_config())
         self.frame = np.full((600, 800, 3), 110, np.uint8)
         cv2.circle(self.frame, (600, 300), 40, (0, 0, 255), -1)
         cv2.circle(self.frame, (200, 300), 25, (0, 0, 255), -1)
