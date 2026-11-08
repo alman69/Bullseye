@@ -85,13 +85,23 @@ export type VisionOverlayOptions = {
 };
 
 export const VISION_TARGETS = ["red", "green", "blue", "yellow", "black"] as const;
-/** What the rover can drive to: the minerals and the black home flag. Yellow is the obstacle color. */
-export const NAV_TARGETS = ["red", "green", "blue", "black"] as const;
+/** What the rover can drive to: the minerals and the black home flag. Blue is the obstacle color. */
+export const NAV_TARGETS = ["red", "green", "black"] as const;
 
 /** Special "sampling class": dragging adds a rover-mask box instead of color samples. */
 export const MASK_TOOL = "__rover_mask__";
-/** Special "sampling class" prefix: dragging teaches that color's HSV range ("__hsv__:green"). */
+/** Special "sampling class" prefix: dragging teaches that color's HSV range ("__hsv__:green",
+ * or "__hsv__:exact:black" to replace the range with exactly what's in the box). */
 export const HSV_TOOL = "__hsv__:";
+export const HSV_EXACT = "exact:";
+
+/** "__hsv__:exact:black" -> { color: "black", exact: true }; null when not an HSV teach tool. */
+export function parseHsvTool(tool: string | null): { color: string; exact: boolean } | null {
+  if (!tool?.startsWith(HSV_TOOL)) return null;
+  const rest = tool.slice(HSV_TOOL.length);
+  const exact = rest.startsWith(HSV_EXACT);
+  return { color: exact ? rest.slice(HSV_EXACT.length) : rest, exact };
+}
 
 export const CAMERA_TUNING: { key: string; label: string; hint: string }[] = [
   { key: "saturation", label: "Color saturation", hint: "Under the floodlight, +2 brings washed-out colors back." },

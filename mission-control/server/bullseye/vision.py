@@ -522,7 +522,10 @@ class VisionService:
     TEACH_FAMILY = {"red": (165, 12, 50), "yellow": (15, 40, 60), "green": (30, 95, 30), "blue": (85, 140, 30)}
 
     def _cmd_hsv_teach(self, p):
-        """Widen one color's HSV range so it covers the color inside a box dragged on the video."""
+        """Widen one color's HSV range so it covers the color inside a box dragged on the video.
+
+        With exact=True the range is *replaced* by what's in the box instead (e.g. black = only
+        as dark as the flag, so lighter shadows stop matching)."""
         import cv2
         import numpy as np
         color = p.get("color")
@@ -536,8 +539,11 @@ class VisionService:
         crop = hsv[int(y0 * hgt):max(int(y1 * hgt), int(y0 * hgt) + 1), int(x0 * wid):max(int(x1 * wid), int(x0 * wid) + 1)]
         px = crop.reshape(-1, 3).astype(int)
         H, S, V = px[:, 0], px[:, 1], px[:, 2]
+        exact = p.get("exact") is True
         if color == "black":
-            keep = V <= min(110, int(np.percentile(V, 60)))          # the darkest part of the box: the flag
+            # Widen: the darkest part of the box. Exact: the box should sit inside the flag, so all
+            # of it except the brightest 10% (glare, an edge of wall).
+            keep = V <= (np.percentile(V, 90) if exact else min(110, int(np.percentile(V, 60))))
         else:
             h0, h1, s_min = self.TEACH_FAMILY[color]
             in_hue = (H >= h0) | (H <= h1) if h0 > h1 else (H >= h0) & (H <= h1)
@@ -547,6 +553,34 @@ class VisionService:
             raise CommandError(f"Couldn't find {color} in that box. Drag a tighter box right on the {color} object.")
 
         old = {k: list(v) for k, v in self.cfg["colors"][color].items()}
+        if exact:
+            new = self._exact_range(color, sel)
+        else:
+            new = self._widened_range(color, sel, old)
+        if new == old:
+            self.message = f"{color} already covers that box. No change."
+            return
+        self._finish_teach(color, old, new, image, (x0, y0, x1, y1), "Set" if exact else "Taught")
+
+    @staticmethod
+    def _exact_range(color: str, sel) -> dict:
+        import numpy as np
+        pct = lambda col, q: int(np.percentile(sel[:, col], q))
+        if color == "black":                 # any hue; as gray and as dark as the flag, plus a little margin
+            return {"h": [0, 179], "s": [0, min(255, pct(1, 95) + 10)], "v": [0, min(255, pct(2, 95) + 8)]}
+        s = [max(0, pct(1, 3) - 10), 255]
+        v = [max(0, pct(2, 3) - 10), 255]
+        if color == "red":
+            hues = np.where(sel[:, 0] < 90, sel[:, 0] + 180, sel[:, 0])
+            lo, hi = int(np.percentile(hues, 3)) - 2, int(np.percentile(hues, 97)) + 2
+            h = [lo % 180, hi % 180] if hi - lo < 179 else [0, 179]
+        else:
+            h = [max(0, pct(0, 3) - 2), min(179, pct(0, 97) + 2)]
+        return {"h": h, "s": s, "v": v}
+
+    @staticmethod
+    def _widened_range(color: str, sel, old: dict) -> dict:
+        import numpy as np
         new = {"s": [min(old["s"][0], int(np.percentile(sel[:, 1], 5))), max(old["s"][1], int(np.percentile(sel[:, 1], 95)))],
                "v": [min(old["v"][0], int(np.percentile(sel[:, 2], 5))), max(old["v"][1], int(np.percentile(sel[:, 2], 95)))]}
         h0, h1 = old["h"]
@@ -560,9 +594,12 @@ class VisionService:
                 new["h"] = [0, 179]
         else:
             new["h"] = [min(h0, int(np.percentile(sel[:, 0], 5))), max(h1, int(np.percentile(sel[:, 0], 95)))]
-        if new == old:
-            self.message = f"{color} already covers that box. No change."
-            return
+        return new
+
+    def _finish_teach(self, color, old, new, image, box, verb):
+        import numpy as np
+        x0, y0, x1, y1 = box
+        hgt, wid = image.shape[:2]
         self._hsv_undo.append((color, old))
         del self._hsv_undo[:-10]
         self.cfg["colors"][color] = new
@@ -576,7 +613,7 @@ class VisionService:
         outside = ~inside if rover is None else (~inside & (rover == 0))
         spill = 100.0 * mask[outside].mean() if outside.any() else 0.0
         warn = " That's a lot: undo and drag a tighter box." if spill > 3 else ""
-        self.message = (f"Taught {color}: H {new['h']} S {new['s']} V {new['v']}. "
+        self.message = (f"{verb} {color}: H {new['h']} S {new['s']} V {new['v']}. "
                         f"It now also matches {spill:.1f}% of the rest of the view.{warn}")
 
     def _cmd_hsv_undo(self, p):

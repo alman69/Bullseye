@@ -68,6 +68,7 @@ DEFAULTS: dict = {
         "explore_steps": 3,
         "explore_timeout_s": 120,
         "explore_forward_ms": 1000,
+        "base_distance_cm": 15,
         "far_forward_ms": 1000,
         "far_bottom_y": 0.55,
         "mid_forward_ms": 500,

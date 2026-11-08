@@ -64,7 +64,7 @@ export type MissionState = {
     hold_id?: string | null;
     distance_status?: "live" | "invalid" | "stale" | "unavailable";
     distance_age_ms?: number | null;
-    auto?: { state: "idle" | "running" | "arrived" | "done" | "failed" | "stopped"; message: string };
+    auto?: { state: "idle" | "running" | "arrived" | "collected" | "deposited" | "done" | "failed" | "stopped"; message: string };
   };
   events: { id: string; at: string; message: string; level: string }[];
   vision?: VisionSummary | null;

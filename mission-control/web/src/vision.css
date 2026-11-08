@@ -287,3 +287,24 @@
   border: 1px solid rgba(235, 70, 70, 0.5);
   color: #ffd2cc;
 }
+
+/* Autopilot mission status: big, unmistakable banners. */
+.mission-banner {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+.mission-banner.collected {
+  color: #7dffb0;
+  background: rgba(60, 220, 130, 0.12);
+  border: 1px solid rgba(60, 220, 130, 0.5);
+}
+.mission-banner.deposited {
+  color: #ffe14d;
+  background: rgba(255, 225, 77, 0.12);
+  border: 1px solid rgba(255, 225, 77, 0.55);
+}

@@ -103,8 +103,10 @@ describe("VisionCalibration", () => {
     const u = ui();
     render(<VisionCalibration vision={{ ...summary, mode: "hsv", hsv_undo: 1, hsv: { red: { h: [176, 10], s: [100, 255], v: [70, 255] } } }} ui={u} canAct act={act} />);
     fireEvent.click(screen.getByRole("tab", { name: /HSV colors/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Teach red from video" }));
+    fireEvent.click(screen.getByRole("button", { name: "Teach red (widen)" }));
     expect(u.setSamplingClass).toHaveBeenCalledWith("__hsv__:red");
+    fireEvent.click(screen.getByRole("button", { name: "Set red exactly" }));
+    expect(u.setSamplingClass).toHaveBeenCalledWith("__hsv__:exact:red");
     fireEvent.click(screen.getByRole("button", { name: "Undo last change" }));
     expect(act).toHaveBeenCalledWith("vision_hsv_undo");
   });
@@ -132,9 +134,9 @@ describe("VisionPanel", () => {
     expect(screen.getByText("RED DETECTED")).toBeTruthy();
     expect(screen.getByText(/APPROACH → TURN LEFT 200 ms/)).toBeTruthy();
     expect(screen.getByText(/~42 cm/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "yellow" })).toBeNull(); // yellow = obstacles, not a target
-    fireEvent.click(screen.getByRole("button", { name: "blue" }));
-    expect(act).toHaveBeenCalledWith("vision_target", { color: "blue" });
+    expect(screen.queryByRole("button", { name: "blue" })).toBeNull(); // blue = obstacles, not a target
+    fireEvent.click(screen.getByRole("button", { name: "black" }));
+    expect(act).toHaveBeenCalledWith("vision_target", { color: "black" });
   });
 
   it("explains when vision is off or unavailable", () => {

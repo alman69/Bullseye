@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { HSV_TOOL, MASK_TOOL, type MaskView, type VisionOverlayOptions } from "@/lib/vision";
+import { MASK_TOOL, parseHsvTool, type MaskView, type VisionOverlayOptions } from "@/lib/vision";
 
 /** Local (per-browser) vision view state: overlay toggles, mask preview, sampling, calibration panel. */
 export function useVisionUi(act: (type: string, payload?: Record<string, unknown>) => Promise<boolean>) {
@@ -18,8 +18,8 @@ export function useVisionUi(act: (type: string, payload?: Record<string, unknown
         ? (box) =>
             void (samplingClass === MASK_TOOL
               ? act("vision_mask_add", { box })
-              : samplingClass.startsWith(HSV_TOOL)
-                ? act("vision_hsv_teach", { color: samplingClass.slice(HSV_TOOL.length), box })
+              : parseHsvTool(samplingClass)
+                ? act("vision_hsv_teach", { ...parseHsvTool(samplingClass), box })
                 : act("vision_sample", { cls: samplingClass, box }))
         : undefined,
     }),

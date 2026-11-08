@@ -285,3 +285,18 @@ def test_teach_hsv_from_a_box(vision_dir):
     assert svc.summary()["hsv"]["green"] == {"h": [50, 85], "s": [150, 255], "v": [60, 255]}
     with pytest.raises(CommandError):                             # a box on plain floor teaches nothing
         run(svc, "vision_hsv_teach", {"color": "green", "box": [0.05, 0.85, 0.15, 0.95]})
+
+
+def test_set_black_exactly_drops_lighter_shadows(vision_dir):
+    svc = service(vision_dir)
+    img = np.full((600, 800, 3), 235, np.uint8)
+    img[:200] = (90, 136, 176)
+    cv2.rectangle(img, (100, 380), (260, 520), (45, 45, 45), -1)       # shadow: dark gray
+    cv2.rectangle(img, (500, 380), (660, 520), (12, 12, 12), -1)       # the flag: much blacker
+    jpeg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 95])[1].tobytes()
+    svc._process(jpeg, 1)
+    run(svc, "vision_hsv_teach", {"color": "black", "box": [0.64, 0.66, 0.81, 0.85], "exact": True})
+    black = svc.summary()["hsv"]["black"]
+    assert black["v"][1] < 40 and "Set black" in svc.message
+    mask = svc.detector.mask(svc._image, "black")
+    assert mask[450, 580] > 0 and mask[450, 180] == 0                    # flag yes, shadow no

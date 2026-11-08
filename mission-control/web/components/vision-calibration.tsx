@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Aperture, Crosshair, Footprints, Ruler, ScanEye, Settings2, SquareDashed } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { VisionUi } from "@/hooks/use-vision-ui";
-import { CAMERA_TUNING, CLASS_HEX, HSV_TOOL, MASK_TOOL, SAMPLE_CLASSES, TUNING, VISION_TARGETS, type VisionSummary } from "@/lib/vision";
+import { CAMERA_TUNING, CLASS_HEX, HSV_EXACT, HSV_TOOL, MASK_TOOL, parseHsvTool, SAMPLE_CLASSES, TUNING, VISION_TARGETS, type VisionSummary } from "@/lib/vision";
 
 type Act = (type: string, payload?: Record<string, unknown>) => Promise<boolean>;
 type Tab = "camera" | "mask" | "hsv" | "colors" | "stop" | "fov" | "steps" | "tuning";
@@ -141,7 +141,9 @@ function HsvTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: Vision
   const saved = vision.hsv?.[color] ?? { h: [0, 179], s: [0, 255], v: [0, 255] };
   const [draft, setDraft] = useState<{ h: number[]; s: number[]; v: number[] } | null>(null);
   const range = draft ?? saved;
-  const teaching = ui.samplingClass?.startsWith(HSV_TOOL) ?? false;
+  const tool = parseHsvTool(ui.samplingClass);
+  const teaching = !!tool;
+  const toolFor = (c: string, exact: boolean) => HSV_TOOL + (exact ? HSV_EXACT : "") + c;
   const commit = (next: { h: number[]; s: number[]; v: number[] }) => {
     setDraft(null);
     void act("vision_hsv", { color, h: next.h, s: next.s, v: next.v });
@@ -166,7 +168,7 @@ function HsvTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: Vision
             onClick={() => {
               setColor(c);
               setDraft(null);
-              if (teaching) ui.setSamplingClass(HSV_TOOL + c);
+              if (tool) ui.setSamplingClass(toolFor(c, tool.exact));
               if (canAct) void act("vision_target", { color: c });
             }}>
             {c}
@@ -174,9 +176,14 @@ function HsvTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: Vision
         ))}
       </div>
       <div className="vision-actions">
-        <Button size="sm" variant={teaching ? "secondary" : "default"} disabled={!canAct} aria-pressed={teaching}
-          onClick={() => ui.setSamplingClass(teaching ? null : HSV_TOOL + color)}>
-          {teaching ? "Stop teaching" : `Teach ${color} from video`}
+        <Button size="sm" variant={tool && !tool.exact ? "secondary" : "default"} disabled={!canAct}
+          aria-pressed={!!tool && !tool.exact}
+          onClick={() => ui.setSamplingClass(tool && !tool.exact ? null : toolFor(color, false))}>
+          {tool && !tool.exact ? "Stop teaching" : `Teach ${color} (widen)`}
+        </Button>
+        <Button size="sm" variant={tool?.exact ? "secondary" : "outline"} disabled={!canAct} aria-pressed={!!tool?.exact}
+          onClick={() => ui.setSamplingClass(tool?.exact ? null : toolFor(color, true))}>
+          {tool?.exact ? "Stop teaching" : `Set ${color} exactly`}
         </Button>
         <Button size="sm" variant="outline" disabled={!canAct || !vision.hsv_undo} onClick={() => void act("vision_hsv_undo")}>
           Undo last change
@@ -184,7 +191,11 @@ function HsvTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: Vision
       </div>
       {teaching && (
         <p className="vision-note">
-          Drag a tight box right on the {color} object the camera misses. Its range widens to cover it (it never shrinks).
+          {tool?.exact
+            ? <>Drag a box <b>inside</b> the {color} object. The range is <b>replaced</b> by exactly what’s in the box, so
+              anything lighter or duller (e.g. shadows for black) stops matching.</>
+            : <>Drag a tight box right on the {color} object the camera misses. Its range widens to cover it (it never
+              shrinks).</>}{" "}
           Watch “also matches … of the rest of the view”: if that’s more than a few %, press Undo.
         </p>
       )}

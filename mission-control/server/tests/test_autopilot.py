@@ -14,12 +14,12 @@ from bullseye.mission import CommandError
 from bullseye.vision import PACKAGE_DIR, VisionService
 
 
-def frame(block_x=None, size=60, bottom=420):
+def frame(block_x=None, size=60, bottom=420, color=(30, 30, 220)):
     img = np.full((600, 800, 3), 235, np.uint8)                  # white floor
     img[:200] = (90, 136, 176)                                    # cardboard wall
     if block_x is not None:
         cv2.rectangle(img, (int(block_x - size / 2), int(bottom - size)), (int(block_x + size / 2), int(bottom)),
-                      (30, 30, 220), -1)                          # red block
+                      color, -1)                                  # red block (or another color)
     return cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 95])[1].tobytes()
 
 
@@ -56,7 +56,8 @@ class World:
 
     def show(self):
         self.seq += 1
-        self.vision._process(frame(self.x if self.visible else None, self.size, self.bottom), self.seq)
+        self.vision._process(frame(self.x if self.visible else None, self.size, self.bottom,
+                                   getattr(self, "color", (30, 30, 220))), self.seq)
 
     async def pulse(self, direction, speed, duration_ms):
         assert 1 <= speed <= 100 and 50 <= duration_ms <= 1000
@@ -155,3 +156,42 @@ def test_turns_back_to_a_brief_sighting(vision):
         asyncio.run(world.drive(Autopilot(world, vision).go_to("red", max_steps=3)))
     first, second = world.steps[0][0], world.steps[1][0]
     assert first in ("left", "right") and second == ("left" if first == "right" else "right")
+
+
+class SonarWorld(World):
+    """The ultrasonic sees the target: 80 cm away at the start, closer with every forward step."""
+
+    def __init__(self, vision, color=(30, 30, 220)):
+        self.color = color
+        super().__init__(vision, block_x=400, size=40)
+        self.cm, self.leds = 80.0, []
+
+    async def pulse(self, direction, speed, duration_ms):
+        await super().pulse(direction, speed, duration_ms)
+        if direction == "forward":
+            self.cm -= {200: 2.7, 500: 7.5, 1000: 15.0}.get(duration_ms, duration_ms * 0.015)
+            self.size, self.bottom = 40 * 80 / self.cm, 420.0          # looks bigger as it gets closer
+
+    async def refresh_distance(self, timeout=2):
+        self.distance_cm = round(self.cm)
+        return True
+
+    async def set_led(self, rgb=None):
+        self.leds.append(tuple(rgb))
+        return True
+
+
+def test_collect_stops_at_20_cm_by_ultrasonic_and_turns_leds_green(vision):
+    world, reports = SonarWorld(vision), []
+    pilot = Autopilot(world, vision, lambda state, message: reports.append(state))
+    assert asyncio.run(world.drive(pilot.collect("red")))
+    assert 20 <= world.cm < 22.7                                     # at 20 cm, within one smallest step
+    assert world.leds == [(255, 0, 0), (0, 255, 0)] and reports[-1] == "collected"
+
+
+def test_return_to_base_stops_15_cm_from_the_flag_wall(vision, monkeypatch):
+    world, reports = SonarWorld(vision, color=(20, 20, 20)), []      # the black flag
+    pilot = Autopilot(world, vision, lambda state, message: reports.append(state))
+    monkeypatch.setattr(pilot, "turn_around", lambda: asyncio.sleep(0))
+    assert asyncio.run(world.drive(pilot.return_to_base()))
+    assert 15 <= world.cm < 17.7 and reports[-1] == "deposited" and world.leds[-1] == (255, 0, 0)
