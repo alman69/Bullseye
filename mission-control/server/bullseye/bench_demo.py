@@ -267,7 +267,7 @@ class BenchControl:
         self.subscribers = set()
         self.stop_jobs = set()
         self.vision = None   # VisionService, attached by create_app when enabled
-        self.auto = {"state": "idle", "message": "Autopilot ready when controls are enabled."}
+        self.auto = {"state": "idle", "message": "Choose a sample color, then start the search.", "target": None, "run_id": None}
         self.log("Rover control online. Connect the bridge, then enable controls.")
 
     def log(self, message, level="info"):
@@ -281,7 +281,7 @@ class BenchControl:
             else "invalid" if self.bridge.distance_cm is None else "live"
         )
         return {
-            "mode": "hardware", "phase": "stopped" if self.stopped else "idle", "target": "red",
+            "mode": "hardware", "phase": "stopped" if self.stopped else "idle", "target": self.auto.get("target") or "red",
             "mission_id": None, "started_at": None, "finished_at": None, "review": None,
             "collection_error": None, "capabilities": {key: False for key in ("mission", "manual", "collection", "return")},
             "rover": "connected" if self.bridge.connected else "not_connected", "camera": self.camera.status(),
@@ -317,6 +317,8 @@ class BenchControl:
     def latch(self, reason, *, latched=True):
         if latched:
             self.armed, self.arm_token, self.stopped = False, None, True
+        if self.auto["state"] in {"running", "scanning", "relocating", "approaching", "arrived"}:
+            self._report("stopped", "Search stopped. Enable controls to start a new search.")
         self.hold_id, self.hold_until = None, 0
         if self.operation and self.operation is not asyncio.current_task():
             self.operation.cancel()
@@ -365,8 +367,9 @@ class BenchControl:
     def launch(self, operation, success="Command bridge ready; STOP and a unique sensor reply received."):
         async def run():
             try:
-                await operation()
-                self.log(success, "success")
+                result = await operation()
+                if result is not False:
+                    self.log(success, "success")
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -426,6 +429,8 @@ class BenchControl:
                         raise CommandError("Stop and wait for the current action before reconnecting.")
                     self.launch(self.bridge.connect)
                 elif kind == "bench_arm":
+                    if self.auto["state"] == "awaiting_pickup":
+                        raise CommandError("Pick up the material and confirm pickup before enabling movement.")
                     if not self.bridge.connected or self.operation or self.stop_pending:
                         raise CommandError("Connect the command bridge and wait for STOP acknowledgement first.")
                     self.armed, self.stopped, self.arm_token = True, False, uuid4().hex
@@ -462,7 +467,23 @@ class BenchControl:
                     name = SCOOPER_ACTIONS[kind]
                     self._scooper_job(self._scooper_command(name))
                     self.log(f"Scooper: {SCOOPER_LABELS[name]} requested.")
-                elif kind in {"auto_goto", "auto_return", "auto_mission"}:
+                elif kind in {"auto_pickup_confirm", "auto_home_confirm"}:
+                    expected = "awaiting_pickup" if kind == "auto_pickup_confirm" else "manual_return"
+                    if self.auto["state"] != expected or not self.auto.get("run_id") or payload.get("run_id") != self.auto["run_id"]:
+                        raise CommandError("This mission confirmation is no longer current.")
+                    if self.operation or self.stop_pending:
+                        raise CommandError("Wait for the rover to stop before confirming.")
+                    if kind == "auto_pickup_confirm":
+                        self._report("manual_return", "Pickup confirmed. Carry the material to home base, then confirm delivery. Enable controls only if you need to drive the rover manually.")
+                        self.log("Pilot confirmed manual pickup. Waiting for delivery to home base.", "success")
+                    else:
+                        self.armed, self.arm_token, self.stopped = False, None, True
+                        self.launch(self._confirm_home, "Pilot confirmed material delivered to home base.")
+                elif kind == "auto_return":
+                    raise CommandError("Bring the material to home base manually, then confirm delivery.")
+                elif kind in {"auto_goto", "auto_mission"}:
+                    if self.auto["state"] in {"awaiting_pickup", "manual_return"}:
+                        raise CommandError("Finish manual pickup and delivery before starting another search.")
                     if not self.armed or not self.bridge.connected or self.stopped:
                         raise CommandError("Connect and enable controls first.")
                     if self.operation or self.stop_pending:
@@ -472,21 +493,12 @@ class BenchControl:
                     if not self.vision or not self.vision.available:
                         raise CommandError("Vision is not running, so the autopilot can't see.")
                     avoid = True  # physical autonomous moves always use obstacle avoidance
-                    if kind in ("auto_goto", "auto_mission"):
-                        color = payload.get("color")
-                        color = "home" if color == "black" else color
-                        if color not in ("red", "green") and not (kind == "auto_goto" and color == "home"):
-                            raise CommandError("Choose a red or green sample. Blue is an obstacle.")
-                        if kind == "auto_mission":
-                            label = f"Autopilot: reach {color}, signal sample success, then return home"
-                            job = lambda pilot: pilot.mission(color, avoid=avoid)
-                        else:
-                            label = f"Autopilot: go to {color}"
-                            job = lambda pilot: pilot.go_to("home", avoid=avoid) if color == "home" else pilot.collect(color, avoid=avoid)
-                        label += " (avoiding obstacles)" if avoid else ""
-                    else:
-                        label = "Autopilot: search for the home flag and stop at base" + (" (avoiding obstacles)" if avoid else "")
-                        job = lambda pilot: pilot.return_to_base(avoid=avoid)
+                    color = payload.get("color")
+                    if color not in ("red", "green"):
+                        raise CommandError("Choose a red or green sample. Blue is an obstacle.")
+                    label = f"Search for {color}: scan 360°, relocate using ultrasonic clearance, approach to 10 cm, then wait for manual pickup"
+                    job = lambda pilot: pilot.mission(color, avoid=avoid)
+                    self.auto = {"state": "running", "message": label, "target": color, "run_id": uuid4().hex}
                     self.direction, self.drive_mode = "auto", "auto"
                     self.log(label + ".")
                     self.launch(lambda: self._autopilot(job), "Autopilot finished. STOP acknowledged in software.")
@@ -495,8 +507,22 @@ class BenchControl:
             self.publish()
 
     def _report(self, state, message):
-        self.auto = {"state": state, "message": message, "expression": "happy" if state == "sample_reached" else "auto"}
+        if state == "awaiting_pickup":
+            # Arrival is already STOP-acknowledged. Require a human handoff before any rearm.
+            self.armed, self.arm_token, self.stopped = False, None, True
+        self.auto = {**self.auto, "state": state, "message": message,
+                     "expression": "happy" if state in {"sample_reached", "awaiting_pickup", "manual_return"} else "auto"}
         self.publish()
+
+    async def _confirm_home(self):
+        if await self.bridge.stop() is not True:
+            self.latch("Delivery confirmation needs an acknowledged STOP. Reconnect the bridge and confirm again.")
+            return False
+        setter = getattr(self.bridge, "set_led", None)
+        if setter is not None and await setter((255, 0, 0)) is not True:
+            self.latch("Delivery indicator was not acknowledged. Reconnect the bridge and confirm again.")
+            return False
+        self._report("home_arrived", "Material delivered to home base. Mission complete; rover controls disabled.")
 
     async def _autopilot(self, job):
         pilot = Autopilot(self.bridge, self.vision, self._report)
@@ -511,6 +537,7 @@ class BenchControl:
             self.log(str(error), "warning")
             if await self.bridge.stop() is not True:
                 self.latch("Autopilot STOP was not acknowledged. Controls disabled.")
+            return False
         except Exception:
             self._report("failed", "Autopilot bridge action failed. STOP requested; motor state is unverified.")
             raise

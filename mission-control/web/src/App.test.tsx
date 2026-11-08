@@ -155,3 +155,34 @@ it("stops a held drive immediately when the control link disappears", () => {
       .hasAttribute("disabled"),
   ).toBe(true);
 });
+
+it("asks for physical pickup before acknowledging the sample", () => {
+  const current = hookState();
+  useMissionMock.mockReturnValue({
+    ...current,
+    state: {
+      ...state,
+      phase: "awaiting_confirmation",
+      distance_cm: 10,
+      review: {
+        id: "review", mission_id: "mission", requested_color: "red",
+        captured_at: "2026-11-08T12:00:00Z", image_url: null,
+        simulated: true, image_source: "simulation",
+      },
+    },
+  });
+  render(<App />);
+  expect(screen.getByText("Pick up the material by hand.")).toBeTruthy();
+  expect(screen.getByText(/The rover is stopped about 10 cm away/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "I picked up the sample" }));
+  expect(current.act).toHaveBeenCalledWith("confirm", { review_id: "review", mission_id: "mission" });
+});
+
+it("requires explicit delivery confirmation after carrying the material home", () => {
+  const current = hookState();
+  useMissionMock.mockReturnValue({ ...current, state: { ...state, phase: "returning" } });
+  render(<App />);
+  expect(screen.getByText(/Carry the material to home base, then confirm delivery/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /Material delivered · finish mission/ }));
+  expect(current.act).toHaveBeenCalledWith("mark_home", undefined);
+});

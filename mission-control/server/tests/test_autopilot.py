@@ -70,6 +70,8 @@ class World:
         elif direction == "right":
             self.x -= duration_ms * 0.4
         elif direction == "forward":
+            if self.wall_cm is not None:
+                self.wall_cm -= duration_ms * 0.015
             self.size = min(260, self.size + duration_ms * 0.15)
             self.bottom = min(590, self.bottom + duration_ms * 0.05)
 
@@ -153,12 +155,12 @@ class GlimpseWorld(World):
             self.visible = False
 
 
-def test_turns_back_to_a_brief_sighting(vision):
+def test_brief_unconfirmed_sighting_keeps_scanning_without_translation(vision):
     world = GlimpseWorld(vision)
     with pytest.raises(AutopilotError):
         asyncio.run(world.drive(Autopilot(world, vision).go_to("red", max_steps=3)))
-    first, second = world.steps[0][0], world.steps[1][0]
-    assert first in ("left", "right") and second == ("left" if first == "right" else "right")
+    assert all(direction == "right" for direction, _ in world.steps)
+    assert len(world.steps) == 3
 
 
 class SonarWorld(World):
@@ -189,7 +191,7 @@ def test_collect_stops_at_10_cm_by_ultrasonic_and_turns_leds_green(vision):
     pilot = Autopilot(world, vision, lambda state, message: reports.append(state))
     assert asyncio.run(world.drive(pilot.collect("red")))
     assert 10 <= world.cm < 12.7                                     # at 10 cm, within one smallest step
-    assert world.leds == [(255, 0, 0), (0, 255, 0)] and reports[-1] == "sample_reached"
+    assert world.leds == [(255, 0, 0), (0, 255, 0)] and reports[-1] == "awaiting_pickup"
 
 
 def test_return_to_base_stops_15_cm_from_the_flag_wall(vision, monkeypatch):
@@ -259,20 +261,13 @@ def test_unreachable_small_step_is_not_arrival(vision):
     assert 'arrived' not in reports and not world.steps
 
 
-def test_mission_celebrates_then_returns_home_without_gripper_actions(vision):
+def test_mission_waits_for_manual_pickup_without_return_or_gripper_actions(vision):
     world, reports = World(vision, block_x=400, size=200, wall_cm=10), []
-
-    def report(state, message):
-        reports.append(state)
-        if state == 'sample_reached':
-            world.color = (20, 20, 20)  # camera can now see the home flag
-            world.wall_cm = 15
-
-    pilot = Autopilot(world, vision, report)
+    pilot = Autopilot(world, vision, lambda state, message: reports.append(state))
     assert asyncio.run(world.drive(pilot.mission('red', pause_s=0)))
-    assert 'sample_reached' in reports and reports[-1] == 'home_arrived'
-    assert reports.index('sample_reached') < reports.index('home_arrived')
-    assert vision.target == 'home' and not world.steps
+    assert reports[-1] == 'awaiting_pickup'
+    assert 'home_arrived' not in reports
+    assert vision.target == 'red' and not world.steps
 
 
 def test_exploration_shortens_step_before_wall_clearance(vision):
@@ -288,22 +283,12 @@ def test_search_timeout_is_bounded_even_for_legacy_config(vision):
     assert Autopilot(None, vision)._planner().s.explore_timeout_s == 120
 
 
-def test_stop_during_celebration_prevents_automatic_return(vision):
-    async def run():
-        world = World(vision, block_x=400, size=200, wall_cm=10)
-        reached = asyncio.Event()
-        reports = []
-        def report(state, message):
-            reports.append(state)
-            if state == 'sample_reached':
-                reached.set()
-        task = asyncio.create_task(world.drive(Autopilot(world, vision, report).mission('red', pause_s=10)))
-        await asyncio.wait_for(reached.wait(), 2)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        assert vision.target == 'red' and 'home_arrived' not in reports and not world.steps
-    asyncio.run(run())
+def test_legacy_pause_parameter_cannot_schedule_an_automatic_return(vision):
+    world, reports = World(vision, block_x=400, size=200, wall_cm=10), []
+    pilot = Autopilot(world, vision, lambda state, message: reports.append(state))
+    assert asyncio.run(world.drive(pilot.mission('red', pause_s=10)))
+    assert reports[-1] == 'awaiting_pickup'
+    assert vision.target == 'red' and not world.steps
 
 
 def test_led_failure_cannot_start_celebration_or_return(vision):
@@ -316,7 +301,7 @@ def test_led_failure_cannot_start_celebration_or_return(vision):
     with pytest.raises(AutopilotError, match='LED/STOP'):
         asyncio.run(world.drive(Autopilot(world, vision, lambda s, m: reports.append(s)).mission('red', pause_s=0)))
     assert colors == [(255, 0, 0), (0, 255, 0)]
-    assert 'sample_reached' not in reports and vision.target == 'red'
+    assert 'awaiting_pickup' not in reports and vision.target == 'red'
 
 
 @pytest.mark.parametrize('color', ['blue', 'yellow'])
@@ -334,7 +319,7 @@ def test_non_sample_colors_are_rejected_by_bench(vision, color):
 
 def test_sample_signal_drives_display_expression_and_clears_on_stop(vision):
     bench = BenchControl(Settings(mode='hardware', bench_enabled=True), vision.camera, bridge=World(vision))
-    bench._report('sample_reached', 'green LEDs')
+    bench._report('awaiting_pickup', 'green LEDs')
     assert bench.snapshot()['bench']['auto']['expression'] == 'happy'
     bench._report('stopped', 'STOP')
     assert bench.snapshot()['bench']['auto']['expression'] == 'auto'
@@ -363,3 +348,128 @@ def test_flickering_false_target_does_not_cause_endless_back_and_forth(vision):
     reversals = sum(a != b for a, b in zip(turns, turns[1:]))
     assert reversals <= len(turns) // 3, turns                     # mostly keeps searching one way
     assert any(d == "forward" for d, _ in world.steps)            # and still gets to explore
+
+
+def test_alignment_turns_use_bearing_and_reduce_after_overshoot(vision):
+    pilot = Autopilot(None, vision)
+    planner = pilot._planner()
+    first = pilot._alignment_ms(planner, -.8)
+    reverse = pilot._alignment_ms(planner, .8, (-.8, first))
+    assert 50 <= first <= 350
+    assert 50 <= reverse <= first / 2
+    assert pilot._alignment_ms(planner, .2) < first
+
+
+def test_target_confirmation_holds_for_flickering_bearings(vision):
+    from types import SimpleNamespace
+    pilot = Autopilot(None, vision)
+    views = iter([(SimpleNamespace(detected=True, horizontal_error=.8), None, None),
+                  (SimpleNamespace(detected=True, horizontal_error=-.5), None, None)])
+    async def fresh(seq):
+        return next(views)
+    pilot._fresh_view = fresh
+    first = (SimpleNamespace(detected=True, horizontal_error=-.4), None, None)
+    assert asyncio.run(pilot._settled_target(first)) is None
+
+
+def test_target_confirmation_uses_median_without_mutating_camera_detection(vision):
+    from types import SimpleNamespace
+    pilot = Autopilot(None, vision)
+    last = SimpleNamespace(detected=True, horizontal_error=.33)
+    views = iter([(SimpleNamespace(detected=True, horizontal_error=.3), None, None), (last, None, None)])
+    async def fresh(seq):
+        return next(views)
+    pilot._fresh_view = fresh
+    result = asyncio.run(pilot._settled_target((SimpleNamespace(detected=True, horizontal_error=.31), None, None)))
+    assert result[0].horizontal_error == .31 and last.horizontal_error == .33
+
+
+def test_fast_turn_overshoot_gets_shorter_reverse_then_forward(vision):
+    class FastTurns(World):
+        async def pulse(self, direction, speed, duration_ms):
+            await super().pulse(direction, speed, duration_ms)
+            if direction in ('left', 'right'):
+                self.x += (.8 if direction == 'left' else -.8) * duration_ms
+    world = FastTurns(vision)
+    assert asyncio.run(world.drive(Autopilot(world, vision).go_to('red')))
+    turns = [(d, ms) for d, ms in world.steps if d in ('left', 'right')]
+    assert turns[0][0] == 'left' and turns[1][0] == 'right'
+    assert turns[1][1] < turns[0][1] <= 350
+    assert any(d == 'forward' for d, _ in world.steps)
+
+
+def test_full_measured_circle_precedes_each_relocation(vision):
+    world = World(vision, visible=False)
+    pilot = Autopilot(world, vision)
+    with pytest.raises(AutopilotError, match='Test step limit'):
+        asyncio.run(world.drive(pilot.go_to('red', max_steps=33)))
+    planner, degrees, relocations = pilot._planner(), 0.0, 0
+    for direction, ms in world.steps:
+        if direction in ('left', 'right'):
+            degrees += pilot._turn_deg(planner, ms)
+        else:
+            assert direction == 'forward' and degrees >= 360
+            assert ms <= 1000  # at most the measured 15 cm relocation pulse
+            relocations += 1
+            degrees = 0.0
+    assert relocations >= 2
+
+
+def test_relocation_uses_a_surveyed_sonar_open_bearing(vision):
+    class OpeningWorld(World):
+        heading = 0.0
+        async def pulse(self, direction, speed, duration_ms):
+            await super().pulse(direction, speed, duration_ms)
+            if direction in ('right', 'left'):
+                pilot = Autopilot(self, vision)
+                self.heading += pilot._turn_deg(pilot._planner(), duration_ms) * (1 if direction == 'right' else -1)
+            else:
+                assert abs((self.heading - 90 + 180) % 360 - 180) < 3
+        async def refresh_distance(self, timeout=2):
+            self.distance_cm = 80 if abs((self.heading - 90 + 180) % 360 - 180) < 3 else 12
+            return True
+    world = OpeningWorld(vision, visible=False)
+    with pytest.raises(AutopilotError, match='Test step limit'):
+        asyncio.run(world.drive(Autopilot(world, vision).go_to('red', max_steps=25)))
+    assert any(direction == 'forward' for direction, _ in world.steps)
+
+
+def test_surveyed_opening_is_rechecked_before_forward_motion(vision):
+    world = World(vision, visible=False)
+    def report(state, message):
+        if state == 'relocating':
+            world.wall_cm = 12  # an obstacle enters the opening after the survey
+    with pytest.raises(AutopilotError):
+        asyncio.run(world.drive(Autopilot(world, vision, report).go_to('red', max_steps=25)))
+    assert not any(direction == 'forward' for direction, _ in world.steps)
+
+
+@pytest.mark.parametrize('distance', [None, 0, -1, float('nan'), float('inf'), True])
+def test_sample_never_approaches_or_arrives_without_valid_sonar(vision, distance):
+    world, reports = World(vision, block_x=400, size=200, wall_cm=distance), []
+    with pytest.raises(AutopilotError, match='valid ultrasonic'):
+        asyncio.run(world.drive(Autopilot(world, vision, lambda s, m: reports.append(s)).go_to('red')))
+    assert not world.steps and 'arrived' not in reports
+
+
+def test_large_camera_target_cannot_confirm_arrival_while_sonar_is_far(vision):
+    world, reports = World(vision, block_x=400, size=200, wall_cm=80), []
+    with pytest.raises(AutopilotError, match='Test step limit'):
+        asyncio.run(world.drive(Autopilot(world, vision, lambda s, m: reports.append(s)).go_to('red', max_steps=3)))
+    assert all(direction == 'forward' for direction, _ in world.steps)
+    assert world.steps and 'arrived' not in reports
+
+
+def test_sample_distance_is_ten_even_if_legacy_config_has_twenty(vision):
+    vision.cfg['navigation']['arrive_distance_cm'] = 20
+    world = SonarWorld(vision)
+    assert asyncio.run(world.drive(Autopilot(world, vision).go_to('red')))
+    assert 10 <= world.cm < 12
+
+
+def test_scan_requires_measured_turns_before_motion(vision):
+    vision.cfg['navigation']['steps']['turn'] = {}
+    world = World(vision, visible=False)
+    with pytest.raises(AutopilotError, match='Measure increasing turn steps'):
+        asyncio.run(world.drive(Autopilot(world, vision).go_to('red')))
+    assert not world.steps

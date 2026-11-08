@@ -45,10 +45,11 @@ class Simulator:
         yield "candidate"
 
     async def collect(self, color: str):
+        """Acknowledge the indicator after the pilot confirms physical pickup."""
         await asyncio.sleep(self.settings.collection_seconds)
         if self.fail_next_collection:
             self.fail_next_collection = False
-            raise RuntimeError("Simulated LED acknowledgement failed. Please retry collection.")
+            raise RuntimeError("Simulated LED acknowledgement failed. Please retry the indicator.")
         self.led_color = "green"
 
     async def begin_return(self):

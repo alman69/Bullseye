@@ -20,14 +20,14 @@ with no GitHub publishing. Check the actual branch/log for completion status.
   first: Mission Control owns the shared BLE session. Automatic ore missions still use
   LED/display signalling without actuating the squeezer. No firmware was flashed.
 - **Red and green are ore targets; blue is an obstacle.** Yellow remains a calibration class.
-  A mission stops at the ore, turns the rover LEDs green, and shows a happy/excited display response.
-  It then automatically searches for the actual home flag and returns from the current heading.
-  The LEDs are red while searching for ore, green after reaching it and during return, and reset
-  to red at home. No blind 180° turn or manual pickup confirmation is required.
+  A mission scans through a measured 360°, relocates using sonar clearance when absent, and
+  scans again. It approaches a stable target to about 10 cm using sonar, stops, and disables
+  motion. The user picks up the material by hand, confirms pickup, carries it home, and
+  confirms delivery. Green LEDs/happy display signal arrival, not physical collection.
 - Home means near-black, not arbitrary dark gray: brightness ≤40/255 and RGB channel spread
   ≤12/255. Color alone cannot distinguish a truly black shadow from the flag.
 - Autonomy remains experimental timed approach/search. Obstacle avoidance stays on; search is
-  bounded; home approach requires sonar; arrival requires fresh centered observations and
+  bounded; approach and relocation require sonar; arrival requires fresh centered observations and
   acknowledged STOP. Physical stopping accuracy and arena exploration remain unverified.
 
 Read [Simple vision](SIMPLE_VISION.md), the [exploration plan](AUTONOMY_PLAN.md), and the
@@ -66,10 +66,10 @@ reports below are historical unless updated explicitly. **Restart the server aft
 
 **Mission:**
 1. A user chooses red or green ore in Mission Control.
-2. With red LEDs, the rover searches, avoids obstacles, approaches the ore, and stops.
-3. Reaching the ore marks the demo sample: LEDs turn green and the display celebrates.
-4. The rover automatically searches for the black home flag and returns with green LEDs.
-5. It stops at home and resets the LEDs to red. No servo or manual pickup/deposit step is involved.
+2. The rover scans 360°, relocates using fresh sonar when absent, and repeats.
+3. It approaches the selected target to about 10 cm by sonar, stops, and disables motion.
+4. The user picks up the material by hand and confirms pickup.
+5. The user carries the material to home base and confirms delivery. The rover never returns automatically.
 
 **Arena (as of 2026-11-08):**
 - **Floor and walls:** matte white floor; unpainted cardboard walls.
@@ -243,22 +243,23 @@ ESP32 camera ──MJPEG──► Mission Control server (FastAPI, Python 3.13)
                           │    → rover mask → detection → floor check → planner DRY RUN
                           │    ──► /ws/vision (overlay) + state.vision (panels)
                           ├─ bench_demo.FactoryBridge ── the ONLY port-100 client (/bench manual driving)
-                          ├─ autopilot.Autopilot ── explicit /bench timed approach + return
+                          ├─ autopilot.Autopilot ── explicit /bench scan + approach + manual handoff
                           └─ mission.MissionControl (state machine, Simulator / HardwareStub adapters)
 Browser dashboard (/ and /bench): video + vision overlay, Vision panel, Calibration panel
 Separate: BLE sender reads the cached /api/bench/state → ESP32-S3 display
 ```
 
-**Current `/bench` autopilot:**
+**Current `/bench` sample mission:**
 1. Claim controls, connect the bridge, and enable controls. Select red or green ore.
-2. Start the ore mission. The rover searches with red LEDs, aims, approaches, and stops at arrival.
-3. The stopped arrival marks the sample: rover LEDs turn green and the display shows a happy/excited
-   response. This is the demo's sample event, not a claim that the object was physically grasped.
-4. The rover automatically searches for the black flag and returns, keeping green LEDs during the
-   return. It stops near the home wall and resets the LEDs to red.
+2. Start the search. The rover scans through a measured 360° turn. If absent, it selects
+   a nearby sonar-clear heading, relocates a bounded distance, and repeats the scan.
+3. On a stable target, align and approach using fresh sonar to about 10 cm. Stop and disable
+   motion; green LEDs and the happy display signal arrival.
+4. Pick up the material by hand and confirm pickup. Carry it to home base and confirm delivery.
+   Manual driving can be enabled separately after pickup if the rover also needs moving.
 
 Blue is an obstacle, never an ore destination. Yellow remains calibratable but is not a mission
-selection. The standalone Return to base control is also available; no manual pickup is required.
+selection. There is no automatic pickup or home return. See [current limits](AUTONOMY_PLAN.md).
 
 Each move uses a bounded N2 pulse with STOP before and after, followed by fresh camera frames.
 Obstacle avoidance is always enabled. The search timeout defaults to 120 seconds and is bounded

@@ -63,7 +63,7 @@ class MissionControl:
             "rover": "simulated" if self.settings.mode == "simulation" else "connected" if self.adapter.connected else "not_connected",
             "camera": self.camera.status(), "pilot_id": self.pilot,
             "led_color": self.adapter.led_color, "motion": dict(self.motion),
-            "distance_cm": (18 if self.phase in {"awaiting_confirmation", "collecting", "collected"} else 120)
+            "distance_cm": (10 if self.phase in {"awaiting_confirmation", "collecting", "collected"} else 120)
                            if self.settings.mode == "simulation" else self.adapter.distance_cm,
             "last_stop_acknowledged": self.last_stop_acknowledged,
             "events": list(self.events),
@@ -200,7 +200,7 @@ class MissionControl:
                     if kind == "confirm":
                         self.require_capability("collection")
                         self.set_phase("collecting")
-                        self.log("Sample confirmed by pilot. Requesting RGB collection acknowledgement.")
+                        self.log("Pilot confirmed manual pickup. Updating the sample indicator; rover remains stopped.")
                         self.spawn(self._collect(self.mission_id))
                     else:
                         self.review = None
@@ -210,16 +210,15 @@ class MissionControl:
                 elif kind == "retry_collection":
                     self.require_phase("collecting")
                     if not self.collection_error:
-                        raise CommandError("Collection is already in progress.")
+                        raise CommandError("The sample indicator is already updating.")
                     self.collection_error = None
-                    self.log("Retrying sample collection.")
+                    self.log("Retrying the sample indicator acknowledgement.")
                     self.spawn(self._collect(self.mission_id))
                 elif kind == "return":
                     self.require_capability("return")
                     self.require_phase("collected")
-                    await self.adapter.begin_return()
                     self.set_phase("returning")
-                    self.log("Assisted return started. Drive home, then select Mark Home.")
+                    self.log("Carry the material to home base, then confirm delivery. Rover movement is manual.")
                 elif kind == "mark_home":
                     self.require_phase("returning")
                     await self.adapter.stop()
@@ -227,7 +226,7 @@ class MissionControl:
                     self.drive_until = 0
                     self.set_phase("completed")
                     self.finished_at = utc_now()
-                    self.log("Home arrival confirmed by pilot. Mission complete.", "success")
+                    self.log("Material delivered to home base, confirmed by pilot. Mission complete.", "success")
                 elif kind == "drive":
                     self.require_capability("manual")
                     self.require_phase("idle", "completed", "returning")
@@ -260,7 +259,9 @@ class MissionControl:
                         self.set_phase("approaching")
                         self.log("Candidate located. Approaching the selected sample.")
                     elif progress == "candidate":
-                        await self.adapter.stop()
+                        self.last_stop_acknowledged = await self.adapter.stop()
+                        if self.last_stop_acknowledged is not True:
+                            raise RuntimeError("Pickup STOP was not acknowledged.")
                         self.motion = {"linear": 0.0, "angular": 0.0}
                         self.set_phase("awaiting_confirmation")
                         review_id = uuid4().hex
@@ -274,7 +275,7 @@ class MissionControl:
                                        "image_url": f"/api/reviews/{review_id}/image" if frame else None,
                                        "simulated": self.settings.mode == "simulation",
                                        "image_source": self.camera.source}
-                        self.log("Sample found. Stopped and waiting for pilot confirmation.")
+                        self.log("Sample reached. Pick up the material manually, then confirm pickup in the dashboard.")
                     self.publish()
         except asyncio.CancelledError:
             raise
@@ -289,14 +290,14 @@ class MissionControl:
                     return
                 self.set_phase("collected")
                 self.collection_error = None
-                self.log("Sample signal acknowledged. LEDs green.", "success")
+                self.log("Manual pickup confirmed and sample indicator acknowledged. Carry the material home.", "success")
                 self.publish()
         except asyncio.CancelledError:
             raise
         except Exception:
             async with self.lock:
                 if self.mission_id == mission_id and self.phase == "collecting":
-                    self.collection_error = "Collection was not acknowledged. Retry or press STOP."
+                    self.collection_error = "Pickup was confirmed, but the sample indicator was not acknowledged. Retry the indicator or press STOP."
                     self.log(self.collection_error, "warning")
                     self.publish()
 

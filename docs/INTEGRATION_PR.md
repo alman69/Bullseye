@@ -1,3 +1,7 @@
+> Historical integration description. The current mission uses 360° scanning, sonar-guided
+> approach, and manual pickup/delivery; see [the current workflow](AUTONOMY_PLAN.md).
+> Validation counts below describe the earlier integration, not the current change.
+
 # PR title
 
 

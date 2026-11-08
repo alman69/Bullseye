@@ -41,8 +41,11 @@ different machine:
 
 Open **http://localhost:8000**. Claim the pilot seat, choose a sample, and launch.
 The simulator searches for three seconds, approaches for three seconds, and then
-stops for review. Confirm or reject the frozen candidate image. After collection,
-select Return Home, use the manual controls if desired, and select Mark Home.
+stops at a simulated 10 cm for manual pickup. Pick up the material and select **I picked up
+the sample**, or reject the candidate to resume searching. The green indicator acknowledges
+your pickup confirmation. Select **I’m carrying it home**, carry the material back yourself,
+and select **Material delivered · finish mission**. Manual rover driving remains optional.
+The simulator demonstrates the handoff; it does not validate physical scanning or arrival.
 At widths up to 800 px, **Mission** contains objectives and sample decisions;
 **Pilot** contains the shared camera and enlarged manual/return controls. Manual
 input stops when leaving Pilot, opening a drawer, releasing input, losing focus,
@@ -80,7 +83,7 @@ The startup script loads that file. Direct Uvicorn launches require `--env-file
 | `BULLSEYE_MODE=simulation` | Default; simulated navigation, RGB, and movement |
 | `BULLSEYE_MODE=hardware` | Hardware stub; motion and mission controls unavailable |
 | `CAMERA_STREAM_URL=http://…` | Relay your real HTTP JPEG stream in either mode |
-| `BULLSEYE_SIM_FAIL_COLLECTION_ONCE=1` | First collection fails; Retry then succeeds |
+| `BULLSEYE_SIM_FAIL_COLLECTION_ONCE=1` | First pickup-indicator acknowledgement fails; Retry then succeeds |
 
 With no camera URL, simulation generates labeled training frames. Hardware mode
 instead reports an unconfigured camera. A configured camera failure never silently
@@ -204,12 +207,12 @@ not that the physical rover performed it. State broadcasts have the form
 | --- | --- |
 | `claim`, `heartbeat`, `release` | Empty; heartbeat once per second, ownership expires at 3 seconds |
 | `ping` | Empty; any viewer; acknowledgement only, no ownership/deadline changes or rover packets |
-| `select_target` | `{ "color": "red" \| "green" \| "blue" }`; idle/completed |
+| `select_target` | `{ "color": "red" \| "green" }`; idle/completed |
 | `start` | Empty; idle/completed and mission capability |
-| `confirm`, `reject` | `{ "mission_id": "…", "review_id": "…" }`; current pending review only |
-| `retry_collection` | Empty; collecting with a recorded failure |
-| `return` | Empty; collected; starts assisted return |
-| `mark_home` | Empty; returning; operator confirms home arrival |
+| `confirm`, `reject` | `{ "mission_id": "…", "review_id": "…" }`; current pending review; confirm means the pilot physically picked up the sample |
+| `retry_collection` | Empty; pickup-indicator update with a recorded failure |
+| `return` | Empty; collected; starts the manual carry-home stage without rover motion |
+| `mark_home` | Empty; returning; operator confirms material delivered to home base |
 | `drive` | `{ "linear": -1..1, "angular": -1..1 }`; idle/completed/returning |
 | `stop` | Empty; any visitor, always available |
 | `reset` | Empty; pilot only, stopped |
@@ -227,8 +230,9 @@ when ready. Keep its capabilities false until each operation has been validated:
   coordinator requests stop, freezes the current fresh frame, and waits for review.
   Reject starts another search iteration for the same mission.
 - `collect(color)` returns only after the RGB operation has been acknowledged;
-  raise on timeout/failure. This simulates collection, not physical retrieval.
-- `begin_return()` prepares assisted return; do not claim autonomous homing.
+  raise on timeout/failure. This is called only after the pilot confirms manual pickup;
+  it updates the indicator and must never actuate a gripper.
+- `begin_return()` is a legacy adapter hook; the manual carry-home transition does not call it.
 - `drive(linear, angular, ttl_ms)` uses positive linear for forward and positive
   angular for right turn; the hardware implementation must enforce a 300 ms TTL
   on the UNO itself. Do not infer physical motor polarity without testing it.

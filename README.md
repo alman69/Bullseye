@@ -10,7 +10,7 @@ Camera-guided sample missions with a laptop-hosted Mission Control dashboard.
 - [Direct ELEGOO connection: no-app, no-motion bench test](docs/ELEGOO_CONNECTION.md)
 - [Local real-rover control demo](docs/ELEGOO_CONNECTION.md#local-browser-control-demo)
 - [Separate ESP32-S3 BLE distance display and Mac sender](docs/BLE_DISPLAY.md)
-- [Autonomous approach, arrival checks, and the exploration roadmap](docs/AUTONOMY_PLAN.md)
+- [360° search, ultrasonic approach, and manual pickup](docs/AUTONOMY_PLAN.md)
 - [Integration PR description](docs/INTEGRATION_PR.md)
 - Manual squeezer control: [combined companion](firmware/esp32-companion/README.md) and [standalone scooper](firmware/esp32-scooper/README.md). Connect, Squeeze, Release, and Straight down are available on `/bench`; STOP stops the squeezer too. Automatic ore missions continue to use LED/display signalling.
 - [Vendor source references and attribution](docs/SOURCE_REFERENCES.md)
@@ -22,8 +22,10 @@ The current setup keeps click-to-calibrate colors and traced rover masks. Each a
 is saved immediately in `software/vision/config.json` and loaded again after a server or device
 restart. Use the same checkout or `BULLSEYE_VISION_DIR` to keep using that calibration.
 
-On `/bench`, a red or green ore mission stops at the ore, signals the sample with green rover LEDs
-and a happy animation on the connected BLE display, then automatically searches for the black home flag and returns.
-Blue is an obstacle; yellow remains available for calibration. This demo marks a sample by reaching
-the ore and showing feedback; it does not physically grasp it. Motion remains experimental and
-uses timed steps with obstacle checks.
+On `/bench`, choose red or green material and start a search. The rover scans through a measured
+360° turn; if the color is absent, it uses ultrasonic readings to select a nearby clear heading,
+moves a bounded distance, and scans again. Once the color is centered, fresh ultrasonic readings
+guide the approach to about 10 cm. The rover stops, disables motion, and asks you to pick up the
+material by hand and carry it to home base. Confirm pickup and then delivery in the UI.
+Blue is an obstacle; yellow remains available for calibration. Motion uses timed calibration and
+still needs supervised physical validation; camera size alone never confirms the 10 cm stop.

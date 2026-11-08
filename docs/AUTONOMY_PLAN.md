@@ -1,149 +1,74 @@
-# From timed approach to reliable exploration
+# Color search and manual pickup
 
+The `/bench` sample mission searches for the selected red or green material, stops about 10 cm
+away using ultrasonic distance, and hands collection to the operator. The user picks up the
+material by hand and carries it back to home base. Neither arrival feedback nor an elapsed timer
+confirms physical collection. The mission does not drive home automatically.
 
-The integrated `/bench` mission approaches red or green ore, stops to signal the sample with green
-rover LEDs and a happy response on the connected BLE display, then automatically searches for the black home flag and returns.
-Reaching the ore is the demo sample event; no grasping or manual pickup is required. This is a
-baseline to validate before building a complete exploration system. The rover does not yet know its
-global position or which floor areas it has visited. A successful simulated mission does not establish physical arrival accuracy.
+## Current sequence
 
-## What the integration provides
+1. **Choose and start.** Claim the pilot seat, connect the rover bridge, enable controls, and
+   choose red or green. Existing palette calibration and traced rover masks are preserved.
+2. **Scan.** Rotate in measured, bounded steps while checking fresh camera frames for that color.
+   Without a confirmed target, finish a full estimated 360° sweep before moving forward. Record
+   valid ultrasonic readings around the sweep.
+3. **Relocate when absent.** Of the sampled headings with sonar and floor clearance, select the
+   one requiring the smallest turn (tie: more clearance). Turn toward it, recheck sonar and floor,
+   and move one measured step of at most 15 cm while preserving wall clearance. Start another
+   360° scan. No echo is unknown space, never clear space.
+4. **Approach the selected material.** Confirm the target across fresh frames, aim with short
+   turns, and remeasure sonar before every forward step. Camera size and the floor stop line
+   cannot substitute for a valid ultrasonic arrival reading. Stop about 10 cm from the object,
+   using a 1 cm early-stop allowance for integer sonar readings.
+5. **Pick up by hand.** After repeated centered arrival checks and acknowledged STOP, disable
+   rover motion. Green LEDs and the happy display indicate arrival. Pick up the material yourself
+   and confirm pickup in the UI; the rover does not operate its gripper.
+6. **Carry home.** Carry the material to home base, then confirm delivery. Re-enable manual
+   controls separately if you also want to drive the rover. A pickup/delivery confirmation never
+   launches automatic return.
 
-- Local palette calibration and rover-mask UI are retained. Red and green are ore targets, blue is
-  an obstacle, and yellow remains a calibration class. Brown cardboard is wall, near-black is a
-  home candidate, and floor is background.
-- Each accepted example saves immediately, including additional lighting/color variations. Server
-  restarts and rover power cycles retain the computer's calibration file. Stale writers are rejected.
-- The Alex training branch contributes timed approach/search, fresh-frame decisions, glimpse
-  recovery, sonar checks, and return-to-home targeting. The local palette replaces its older color UI.
-- Physical autonomous commands always use obstacle avoidance and a bounded search time. Home
-  approach requires a valid sonar reading. Arrival needs repeated fresh centered observations and
-  acknowledged STOP; an unexecutable tiny final step does not count as arrival. Integer sonar
-  readings use a 1 cm early-stop buffer; physical error still needs measurement.
-- At stopped ore arrival, `sample_reached` signals the demo sample: rover LEDs turn green and the
-  display celebrates. The mission then automatically searches for home and returns with green LEDs.
-  At `home_arrived`, it stops and resets red. Ore searching starts with red LEDs.
-- Manual servo controls are available separately. The autonomous sample event records arrival, not physical possession. No manual
-  pickup/deposit confirmation or arbitrary wait for a person is part of the mission.
+The UI places current stage, selected color, distance, and the next required action near the camera.
+STOP remains available throughout. Blue is an obstacle; yellow remains a calibration class.
+Near-black home detection remains available for diagnostics and legacy direct navigation, but is
+not part of this mission's manual delivery confirmation.
 
-Color and size are still heuristics. A black shadow can resemble the home flag, the sonar can see a
-wall behind a small target, and timed motion drifts with battery, traction, and load. The phases below
-address those limits in order. Complete each acceptance gate before enabling the next behavior.
+## What the sensors can establish
 
-## 1. Establish measured stopping and replay evidence
+The rover has no global map, measured wheel odometry, or complete model of reachable floor.
+“Nearby open space” means a locally observed sonar-clear direction for a short relocation, not a
+proof that it is the globally nearest opening or that the whole arena has been searched. Timed
+turns estimate 360° using saved turn calibration; battery, traction, PWM, and load affect coverage.
 
-Record short camera sequences, frame timestamps, detector outputs, sonar replies, requested motion,
-STOP acknowledgements, and operator-measured final gaps. Keep recordings outside Git. Annotate
-target identity, occlusion, base visibility, and shadows so the same failures can be replayed.
+Sonar measures from its sensor origin, not from the gripper tips. A small material below the beam
+can produce a reading from the wall behind it. Use materials the sensor can detect and measure the
+mounting offset during physical validation. A color match alone cannot establish object identity.
+A simulated success does not establish physical arrival accuracy.
 
-Measure the camera pose, stick-tip zero point, sonar origin/beam height, and distance offset between
-them. Re-measure forward and turning tables at the active PWM, loaded rover weight, and representative
-battery levels. Mark a minimum reliable pulse; interpolation below that pulse must remain a
-stopped-short result. Define an operator-approved ore-arrival gap and home gap rather than treating
-sonar centimeters as stick-tip centimeters.
+The search is bounded by the configured timeout (30–300 seconds, normally 120). Missing camera
+frames, unavailable sonar, blocked relocation, an unsafe final step, failed STOP, lost pilot
+ownership, or connection loss produce a stopped/failed result. Reconnecting never resumes motion.
 
-Acceptance:
+## Acceptance checks before physical use
 
-- Replay empty floor/wall/shadow clips without false target arrival or a false home arrival.
-- Run ten supervised approaches per color from varied headings/distances. Record all final gaps;
-  every claimed arrival must be within the agreed tolerance, with no contact or overshoot.
-- Verify camera loss, delayed frames, invalid sonar, stale control tokens, and failed STOP replies
-  produce a stopped/failed outcome rather than mission success.
-- Restart the server and power-cycle the camera; verify identical saved profiles and masks, and
-  confirm camera controls were reapplied before comparing detections.
+- Measure forward and turning steps at the active PWM, representative battery levels, and actual
+  rover load. Confirm one complete scan covers the surroundings without premature translation.
+- Exercise scenes with no target, a target behind the rover, an interrupted sighting, a blocked
+  heading, invalid sonar, and an obstacle entering the selected opening. Check every relocation
+  against a fresh distance reading and repeat the scan afterward.
+- Run supervised approaches for both colors from varied headings. Record the measured gap and
+  sonar reading for every claimed arrival. No camera-only or below-beam target should count as
+  a confirmed 10 cm approach.
+- Verify that arrival leaves wheels stopped and controls disabled. Confirming pickup and delivery
+  must issue no motor movement, and no timer may start a home search.
+- Check duplicate/stale confirmations, STOP at every phase, camera loss, failed STOP replies,
+  pilot disconnect, and process restart. Never resume an interrupted mission automatically.
+- Retain camera sequences, sensor readings, pulse durations, and STOP acknowledgements outside
+  Git for replay. Distinguish a software acknowledgement from observed physical stopping.
 
-## 2. Make the sample event and automatic return dependable
+## Future exploration work
 
-Keep navigation states explicit: `searching`, `approaching`, `sample_reached`, `returning`,
-`home_arrived`, and `aborted`. Only a successful stopped arrival enters `sample_reached`; a timer,
-a single detection, or an LED command alone cannot trigger the sample event. Then start home search
-without requiring operator pickup confirmation. The mission records reaching the ore, not grasping it.
-
-Add a short stationary verification window for target identity, alignment, and measured distance.
-Use hysteresis so one frame cannot toggle arrival. If the target is lost, evidence conflicts, or
-motion cannot safely close the remaining gap, keep the rover stopped and explain the reason.
-Persist a mission journal for diagnostics, but require fresh ownership/enablement after restart;
-never resume motor commands automatically.
-
-Keep feedback consistent with motion: red for ore search, green once the sample event succeeds and
-throughout return, and red after confirmed home arrival. The happy/excited display response comes
-from the same sample event. Send LED commands only while stopped; the stock rover's STOP command
-clears its LEDs, so the desired mission color must be restored safely between timed steps.
-
-Acceptance:
-
-- Verify the order: stopped ore arrival, sample feedback, automatic home search, stopped home arrival.
-- Reject duplicate/stale mission commands and retain STOP priority during every state transition.
-- Ensure a failed STOP or arrival check cannot start return or announce a sample.
-- Verify the board LEDs remain green across return steps and the display receives the sample event.
-- After process loss or power loss, boot stopped and disarmed, with the interrupted mission visible.
-- Separate software STOP acknowledgement from physical stopped verification in logs and UI.
-
-## 3. Track local motion and uncertainty
-
-Start with a local coordinate frame at home and integrate the measured pulse model. Record uncertainty
-with every movement; this is estimated odometry, not measured wheel travel. Use available heading
-sensors only after verifying their transport and calibration. Do not assume that the stock firmware
-exposes encoder or IMU data to Mission Control.
-
-Add repeatable visual landmarks or a deliberate base marker geometry to correct drift. If hardware
-can support measured wheel travel later, introduce it through an adapter with tests. Record obstacle
-observations with timestamp and pose uncertainty; discard stale or poorly localized observations.
-Stop or relocalize when uncertainty exceeds a tested bound.
-
-Acceptance:
-
-- Compare estimated and measured end poses for straight, turning, and closed-loop routes.
-- Quantify drift across battery levels and surfaces and set the allowed localization uncertainty.
-- Demonstrate relocalization to the home landmark from multiple headings and ranges.
-- Never mark uncertain unseen space as clear merely because no obstacle was detected.
-
-## 4. Explore bounded, reachable space
-
-Use a small local occupancy grid or waypoint graph with `unknown`, `observed free`, `occupied`, and
-`visited` states. Inflate obstacles by the measured rover footprint plus localization uncertainty.
-Choose a reachable frontier based on travel cost, unexplored visibility, and the cost of returning
-home. Keep a visit history so the rover does not repeatedly turn into the same dead end.
-
-Begin with a configured arena boundary and conservative motion budget. Replan after each bounded
-move using fresh camera/sonar observations. Limit time, distance, retries, and uncertainty. If all
-frontiers are blocked or no valid observation arrives, stop with a specific result. A target sighting
-can interrupt exploration; its location and confidence should be stored for reacquisition.
-
-Acceptance:
-
-- Simulated and replay scenarios cover corridors, cul-de-sacs, an unreachable target, repeated
-  sightings, occlusion, and a dynamically blocked route without endless loops.
-- In a measured test arena, report coverage of reachable floor and revisit count against ground
-  truth. Set a target coverage threshold before the run, not after observing the result.
-- Every run terminates by target arrival, exhausted reachable frontiers, a stated budget limit,
-  operator STOP, or a sensor/localization fault.
-
-## 5. Return home with route and identity checks
-
-Plan a route through known free space toward the saved home region. Reserve enough motion/time
-budget for return. Revalidate the route as obstacles change, then switch to a short final approach
-only after reacquiring the home marker. Do not infer home from a 180° turn or a single dark blob.
-
-Keep the strict near-black palette gate and add marker geometry, expected location, multi-frame
-consistency, and a clear approach corridor. Use calibrated sonar distance for the wall and an
-appropriate visual marker check for identity. If home remains ambiguous, hold and request operator
-help instead of declaring completion.
-
-Acceptance:
-
-- Return from several mapped locations and headings, including with an initially hidden flag.
-- Reject equally black shadows/objects outside the expected home geometry/location.
-- Stop short on missing sonar, a blocked final corridor, a missing flag, or excessive pose uncertainty.
-- Record the final physical gap, confirm motion stops, and verify completion resets the LEDs to red.
-
-## 6. Roll out in controlled stages
-
-Use recorded replay first, then the simulator with fault injection, then wheels-raised command tests,
-then a cleared physical arena, then cluttered runs. Keep manual driving, STOP, and the current color
-calibration workflow available. Add a prominent mission state and reason for holding; keep maps and
-diagnostic tuning optional until they help the operator make a decision.
-
-The release gate is a reproducible acceptance log covering successful approaches, interrupted runs,
-sample feedback, automatic return, return-home identity, and measured stopping distance. Do not label this fully autonomous
-exploration until coverage, drift bounds, and failure handling pass the same physical test course.
+Reliable arena coverage needs pose estimates with measured uncertainty, an occupancy map inflated
+by the rover footprint, and a visit history to avoid repeated dead ends. Start with recorded replay
+and a bounded test arena; validate drift, reachability, and obstacle changes before extending the
+search. Automatic home navigation would be a separate feature with route and home-identity checks,
+not a consequence of confirming manual pickup.

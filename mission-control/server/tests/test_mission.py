@@ -175,3 +175,36 @@ async def test_hardware_stub_never_claims_movement_or_stop():
     assert control.last_stop_acknowledged is False
     assert control.snapshot()["distance_cm"] is None
     assert control.camera.status()["status"] == "unconfigured"
+
+
+async def test_arrival_waits_for_manual_pickup_and_return_does_not_move(control):
+    control.adapter.collect = AsyncMock(wraps=control.adapter.collect)
+    control.adapter.begin_return = AsyncMock()
+    review = await launch_to_review(control)
+    await asyncio.sleep(.06)
+    assert control.phase == "awaiting_confirmation"
+    assert control.snapshot()["distance_cm"] == 10
+    assert control.last_stop_acknowledged is True
+    assert control.adapter.motion == (0, 0)
+    control.adapter.collect.assert_not_awaited()
+    with pytest.raises(CommandError):
+        await control.command("pilot", "return", {})
+    await control.command("pilot", "confirm", review_payload(review))
+    await wait_until(lambda: control.phase == "collected")
+    await asyncio.sleep(.06)
+    assert control.phase == "collected"
+    await control.command("pilot", "return", {})
+    assert control.phase == "returning"
+    assert control.adapter.motion == (0, 0)
+    control.adapter.begin_return.assert_not_awaited()
+    await control.command("pilot", "mark_home", {})
+    assert control.phase == "completed"
+
+
+async def test_unacknowledged_arrival_stop_never_offers_manual_pickup(control):
+    control.adapter.stop = AsyncMock(return_value=False)
+    await control.command("pilot", "claim", {})
+    await control.command("pilot", "start", {})
+    await wait_until(lambda: control.phase == "stopped")
+    assert control.review is None
+    assert control.last_stop_acknowledged is False

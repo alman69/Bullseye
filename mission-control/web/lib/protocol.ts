@@ -65,7 +65,13 @@ export type MissionState = {
     distance_status?: "live" | "invalid" | "stale" | "unavailable";
     distance_age_ms?: number | null;
     scooper?: ScooperState;
-    auto?: { state: "idle" | "running" | "arrived" | "sample_reached" | "home_arrived" | "done" | "failed" | "stopped"; message: string; expression?: "happy" | "auto" | null };
+    auto?: {
+      state: "idle" | "running" | "scanning" | "relocating" | "approaching" | "arrived" | "sample_reached" | "awaiting_pickup" | "manual_return" | "home_arrived" | "done" | "failed" | "stopped";
+      message: string;
+      target?: "red" | "green" | "home";
+      run_id?: string;
+      expression?: "happy" | "auto" | null;
+    };
   };
   events: { id: string; at: string; message: string; level: string }[];
   vision?: VisionSummary | null;
@@ -105,10 +111,10 @@ export const PHASE_LABELS: Record<Phase, string> = {
   idle: "Ready for launch",
   searching: "Searching for sample",
   approaching: "Approaching sample",
-  awaiting_confirmation: "Awaiting your confirmation",
+  awaiting_confirmation: "Ready for manual pickup",
   collecting: "Collecting sample",
-  collected: "Sample collected",
-  returning: "Assisted return",
+  collected: "Pickup confirmed",
+  returning: "Carry sample home",
   completed: "Mission complete",
   stopped: "Stop latched",
 };

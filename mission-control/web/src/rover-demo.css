@@ -110,3 +110,12 @@
   .bench-shell[data-armed="true"] .bench-pad button svg { height: 16px; }
   .bench-shell[data-armed="true"] .bench-status { order: 2; }
 }
+
+/* Keep the live camera and next mission action together in the armed mobile layout. */
+@media (max-width: 800px) {
+  .bench-shell[data-armed="true"] .autopilot-panel { order: 1; }
+  .bench-shell[data-armed="true"] .bench-controls { order: 2; }
+  .bench-shell[data-armed="true"] .bench-status { order: 3; }
+  .bench-shell[data-armed="true"] .vision-panel,
+  .bench-shell[data-armed="true"] .scooper-panel { order: 4; }
+}

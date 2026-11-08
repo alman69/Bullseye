@@ -334,10 +334,46 @@
 /* Keep mission actions aligned without squeezing their labels. */
 .autopilot-colors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .autopilot-colors .vision-chip { justify-content: center; min-height: 40px; }
-.autopilot-actions { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 10px; }
+.autopilot-actions { display: grid; grid-template-columns: minmax(0, 1fr) 100px; gap: 10px; }
 .autopilot-actions > button { width: 100%; min-width: 0; min-height: 44px; height: auto; padding: 12px; white-space: normal; text-align: center; }
 .autopilot-actions svg { flex-shrink: 0; }
 .autopilot-start { font-weight: 700; }
 @media (max-width: 520px) {
   .autopilot-actions { grid-template-columns: minmax(0, 1fr); }
+}
+
+.autopilot-panel .vision-body { display: grid; gap: 16px; padding: 18px 20px 20px; }
+.autopilot-readouts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.autopilot-readouts > div { padding-right: 12px; border-right: 1px solid #364e6760; }
+.autopilot-readouts > div:last-child { border: 0; padding-right: 0; }
+.autopilot-readouts span { display: block; font-size: 10px; color: #b8c2d0; }
+.autopilot-readouts strong { display: block; margin-top: 5px; font-size: clamp(18px, 2.2vw, 26px); font-weight: 600; text-transform: capitalize; }
+.autopilot-readouts small { font-size: 14px; font-weight: 400; }
+.autopilot-readouts .range-live strong { color: #b5d6bc; }
+.autopilot-readouts .range-unavailable strong { color: #e9bc9c; }
+.autopilot-guidance { padding: 16px; border-radius: 8px; border: 1px solid #364e67; background: #182c43; }
+.autopilot-guidance h3 { margin: 0 0 7px; font-size: clamp(17px, 2vw, 22px); font-weight: 600; line-height: 1.35; }
+.autopilot-guidance p { margin: 0; color: #c4cfdb; font-size: 13px; line-height: 1.65; }
+.autopilot-guidance.needs-action { background: #213930; border-color: #67bd8c; }
+.autopilot-guidance.needs-action h3 { color: #b8f6cf; }
+.autopilot-guidance.complete { border-color: #dfc26a; }
+.autopilot-stages { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; list-style: none; margin: 0; padding: 0; }
+.autopilot-stages li { display: flex; align-items: center; gap: 6px; color: #a5b4c6; font-size: 10px; line-height: 1.4; }
+.autopilot-stages li > span { flex-shrink: 0; display: grid; place-items: center; width: 23px; height: 23px; border: 1px solid #49617b; border-radius: 50%; }
+.autopilot-stages .current { color: #fff0bf; font-weight: 700; }
+.autopilot-stages .current > span { border-color: #dfc26a; background: #dfc26a24; }
+.autopilot-stages .done { color: #b5d6bc; }
+.autopilot-stages .done > span { border-color: #67bd8c; }
+.autopilot-detail { color: #aebccc; font-size: 11px; }
+.autopilot-detail summary { cursor: pointer; padding: 4px 0; }
+.autopilot-detail .vision-message, .autopilot-detail .vision-warning { margin: 8px 0 0; line-height: 1.6; }
+@media (max-width: 520px) {
+  .autopilot-panel .vision-body { padding: 14px; gap: 14px; }
+  .autopilot-panel .panel-heading { flex-wrap: wrap; gap: 8px; }
+  .autopilot-readouts { gap: 8px; }
+  .autopilot-readouts > div { padding-right: 8px; }
+  .autopilot-readouts span { font-size: 9px; }
+  .autopilot-guidance { padding: 13px; }
+  .autopilot-stages { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .autopilot-actions { grid-template-columns: minmax(0, 1fr) 80px; }
 }

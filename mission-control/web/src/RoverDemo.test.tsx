@@ -139,7 +139,7 @@ it("disables through the red toggle even while moving and displays live/stale/in
   state.distance_cm = null;
   state.bench!.distance_status = "invalid";
   rerender(<RoverDemo />);
-  expect(screen.getByText("No echo")).toBeTruthy();
+  expect(screen.getAllByText("No echo")).toHaveLength(2);
 });
 
 it("disables steps and requests stop when the browser connection drops", () => {
@@ -175,4 +175,29 @@ it("restores pilot scooper controls without enabling rover driving", () => {
   expect(screen.getByRole("region", { name: /scooper/i })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Squeeze" }));
   expect(act).toHaveBeenCalledWith("scooper_squeeze");
+});
+
+it("keeps pickup confirmation available while disarmed and blocks enabling movement until pickup", async () => {
+  state.bench!.armed = false;
+  state.bench!.arm_token = null;
+  state.bench!.auto = { state: "awaiting_pickup", message: "Stopped at 10 cm.", target: "red", run_id: "pickup-run" };
+  render(<RoverDemo />);
+  expect(screen.getByRole("button", { name: "Enable controls" }).hasAttribute("disabled")).toBe(true);
+  expect(screen.getByRole("button", { name: "Step forward" }).hasAttribute("disabled")).toBe(true);
+  const confirm = screen.getByRole("button", { name: "I picked up the material" });
+  expect(confirm.hasAttribute("disabled")).toBe(false);
+  await flushReact(async () => { fireEvent.click(confirm); });
+  expect(act).toHaveBeenCalledWith("auto_pickup_confirm", { run_id: "pickup-run" });
+});
+
+it("allows optional manual driving after pickup with a separate home delivery confirmation", async () => {
+  state.bench!.armed = false;
+  state.bench!.arm_token = null;
+  state.bench!.auto = { state: "manual_return", message: "Bring material home.", target: "green", run_id: "return-run" };
+  render(<RoverDemo />);
+  expect(screen.getByRole("button", { name: "Enable controls" }).hasAttribute("disabled")).toBe(false);
+  const home = screen.getByRole("button", { name: "Material is at home base" });
+  expect(home.hasAttribute("disabled")).toBe(false);
+  await flushReact(async () => { fireEvent.click(home); });
+  expect(act).toHaveBeenCalledWith("auto_home_confirm", { run_id: "return-run" });
 });

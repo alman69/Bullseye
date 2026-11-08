@@ -53,9 +53,9 @@ const SKY = { planetX: 0.74, planetY: 0.2 };
 const STAGES = [
   { name: "Search", icon: ScanLine },
   { name: "Approach", icon: Crosshair },
-  { name: "Verify", icon: ShieldCheck },
-  { name: "Collect", icon: Gem },
-  { name: "Return", icon: Home },
+  { name: "Pick up", icon: ShieldCheck },
+  { name: "Confirm", icon: Gem },
+  { name: "Carry home", icon: Home },
   { name: "Complete", icon: Flag },
 ];
 const STAGE_INDEX: Record<Phase, number> = {
@@ -127,7 +127,7 @@ function SampleReview({
       <div className="panel-heading">
         <div className="heading-icon">
           <Gem size={16} />
-          <h2>Sample verification</h2>
+          <h2>Manual sample pickup</h2>
         </div>
         <span className={`small-indicator ${awaiting ? "accent" : ""}`}>
           {awaiting
@@ -155,13 +155,13 @@ function SampleReview({
           </div>
           <div className="review-copy">
             <p className="eyebrow">WE FOUND SOMETHING.</p>
-            <h3>Is this the sample you wanted?</h3>
+            <h3>Pick up the material by hand.</h3>
             <p>
               Requested:{" "}
               <strong style={{ color: SAMPLE_HEX[review.requested_color] }}>
                 {review.requested_color} sample
               </strong>
-              . The rover is stopped and waiting for your call.
+              . The rover is stopped about 10 cm away. Collect the material yourself, then confirm below.
             </p>
             <div className="review-buttons">
               <Button
@@ -170,7 +170,7 @@ function SampleReview({
                 onClick={() => void action("confirm", payload)}
               >
                 <Check size={15} />
-                Confirm sample
+                I picked up the sample
               </Button>
               <Button
                 disabled={!canAct || busy}
@@ -202,12 +202,12 @@ function SampleReview({
           <div>
             <h3>
               {state?.collection_error
-                ? "Collection needs another try."
-                : "One small sample. One big moment."}
+                ? "Sample indicator needs another try."
+                : "Pickup confirmed. Updating the indicator."}
             </h3>
             <p>
               {state?.collection_error ||
-                "Waiting for the sample indicator acknowledgement before marking this sample collected."}
+                "Your pickup is confirmed. Waiting for the green indicator acknowledgement; the rover stays stopped."}
             </p>
             {state?.collection_error && (
               <Button
@@ -216,7 +216,7 @@ function SampleReview({
                 onClick={() => void action("retry_collection")}
               >
                 <RotateCcw size={14} />
-                Retry collection
+                Retry indicator
               </Button>
             )}
           </div>
@@ -230,12 +230,12 @@ function SampleReview({
             <h3>
               {phase === "completed"
                 ? "Sample home. Mission accomplished."
-                : "Sample confirmed and collected."}
+                : "You confirmed manual pickup."}
             </h3>
             <p>
               {phase === "completed"
                 ? "Home arrival was confirmed by the pilot. Ready for another discovery."
-                : "The green indicator command was acknowledged. Your sample is ready for the journey home."}
+                : "Carry the material back to home base. Confirm delivery when you arrive."}
             </p>
           </div>
           <div
@@ -422,18 +422,17 @@ export default function App() {
                     obstacles, brown marks cardboard walls, and black marks
                     home. The simulator searches, approaches, and stops for review.
                   </p>
-                  <h3>03 / Make the call</h3>
+                  <h3>03 / Pick up by hand</h3>
                   <p>
-                    Confirm the captured sample or send the rover searching
-                    again. Collection completes after the indicator command is
-                    acknowledged.
+                    The rover stops about 10 cm from the selected material.
+                    Pick it up yourself, then confirm pickup. If it is the wrong
+                    sample, choose Keep searching.
                   </p>
                   <h3>04 / Bring it home</h3>
                   <p>
-                    On phones, open the Pilot tab for manual driving. Select
-                    Return Home. Use the on-screen pad or WASD/arrow keys to
-                    assist the return. Select Mark Home when the rover has
-                    arrived.
+                    Carry the material back to home base and confirm delivery.
+                    To move the rover, use the Pilot tab and manual controls.
+                    Returning the material never starts automatic rover motion.
                   </p>
                   <h3>Stopping and reconnecting</h3>
                   <p>
@@ -595,12 +594,12 @@ export default function App() {
                 phase === "awaiting_confirmation" && (
                   <div className="pilot-review-notice">
                     <Gem size={19} />
-                    <span>A sample is waiting for your decision.</span>
+                    <span>The rover is stopped. Pick up the sample by hand.</span>
                     <Button
                       variant="outline"
                       onClick={() => setMobileView("mission")}
                     >
-                      Review sample
+                      Confirm pickup
                     </Button>
                   </div>
                 )}
@@ -749,7 +748,7 @@ export default function App() {
                       ? "Waiting for the hardware navigation adapter."
                       : phase !== "idle" && phase !== "completed"
                         ? "Mission in progress. Stay curious."
-                        : "Search. Verify. Collect. Return."}
+                        : "Scan 360°. Approach to 10 cm. Pick up by hand. Carry home."}
                   </p>
                 </div>
               </Card>
@@ -811,8 +810,8 @@ export default function App() {
                   <span className="micro">SAMPLE INDICATOR</span>
                   <strong>
                     {state?.led_color
-                      ? `${state.led_color} sample`
-                      : "No sample collected"}
+                      ? "Pickup indicator on"
+                      : "Pickup not yet confirmed"}
                   </strong>
                   <small>
                     {state?.mode === "simulation"
@@ -829,8 +828,8 @@ export default function App() {
                 </div>
                 <p>
                   {phase === "returning"
-                    ? "Use manual controls to return to base, then confirm your arrival."
-                    : "Your mission ends where it began."}
+                    ? "Carry the material to home base, then confirm delivery. Drive the rover manually if needed."
+                    : "After pickup, carry the material to home base yourself."}
                 </p>
                 <Button
                   variant="outline"
@@ -852,8 +851,8 @@ export default function App() {
                     <Home size={15} />
                   )}{" "}
                   {phase === "returning"
-                    ? "Mark home · finish mission"
-                    : "Return home"}
+                    ? "Material delivered · finish mission"
+                    : "I’m carrying it home"}
                   <ChevronRight size={14} />
                 </Button>
               </section>

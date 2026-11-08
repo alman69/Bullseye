@@ -493,3 +493,91 @@ async def test_set_led_stops_first_then_sets_the_color(tcp):
     assert await bridge.set_led((0, 255, 0))
     assert [command["N"] for command in writer.commands][-2:] == [100, 8]
     assert (writer.commands[-1]["D2"], writer.commands[-1]["D3"]) == (0, 255) and not bridge.led_dirty
+
+
+async def finish_sample_search(bench, monkeypatch):
+    from types import SimpleNamespace
+
+    async def mission(pilot, color, avoid=True):
+        assert color == "green" and avoid
+        assert await pilot.bridge.stop()
+        pilot.report("awaiting_pickup", "Stopped at green. Pick up the material manually.")
+        return True
+
+    monkeypatch.setattr("bullseye.bench_demo.Autopilot.mission", mission)
+    bench.vision = SimpleNamespace(available=True, summary=lambda: {"available": True})
+    await arm(bench)
+    await bench.command("pilot", "auto_mission", {"color": "green", "arm_token": bench.arm_token})
+    await settle(bench)
+    return {"run_id": bench.auto["run_id"]}
+
+
+async def test_sample_arrival_disarms_and_requires_manual_pickup_and_delivery(bench, monkeypatch):
+    confirmation = await finish_sample_search(bench, monkeypatch)
+    assert bench.auto["state"] == "awaiting_pickup"
+    assert bench.auto["expression"] == "happy"
+    assert bench.snapshot()["target"] == bench.auto["target"] == "green"
+    assert not bench.armed and bench.arm_token is None and bench.stopped
+    with pytest.raises(CommandError, match="Pick up"):
+        await bench.command("pilot", "bench_arm", {})
+    with pytest.raises(CommandError, match="Finish manual"):
+        await bench.command("pilot", "auto_mission", {"color": "red"})
+    with pytest.raises(CommandError, match="Claim"):
+        await bench.command("viewer", "auto_pickup_confirm", confirmation)
+    with pytest.raises(CommandError, match="no longer current"):
+        await bench.command("pilot", "auto_home_confirm", confirmation)
+    with pytest.raises(CommandError, match="no longer current"):
+        await bench.command("pilot", "auto_pickup_confirm", {"run_id": "previous-run"})
+    await bench.command("pilot", "auto_pickup_confirm", confirmation)
+    assert bench.auto["state"] == "manual_return" and not bench.armed
+    assert bench.bridge.pulses == []
+    with pytest.raises(CommandError, match="no longer current"):
+        await bench.command("pilot", "auto_pickup_confirm", confirmation)
+    await bench.command("pilot", "bench_arm", {})
+    await bench.command("pilot", "auto_home_confirm", confirmation)
+    await settle(bench)
+    assert bench.auto["state"] == "home_arrived" and not bench.armed
+    assert bench.auto["expression"] == "auto" and bench.arm_token is None
+    assert bench.bridge.pulses == []
+
+
+async def test_pending_pickup_survives_stop_and_pilot_disconnect(bench, monkeypatch):
+    confirmation = await finish_sample_search(bench, monkeypatch)
+    await bench.stop()
+    await settle(bench)
+    await bench.disconnect("pilot")
+    await settle(bench)
+    assert bench.auto["state"] == "awaiting_pickup"
+    await bench.command("next-pilot", "claim", {})
+    await bench.command("next-pilot", "auto_pickup_confirm", confirmation)
+    assert bench.auto["state"] == "manual_return"
+
+
+async def test_home_confirmation_requires_stop_acknowledgement(bench, monkeypatch):
+    confirmation = await finish_sample_search(bench, monkeypatch)
+    await bench.command("pilot", "auto_pickup_confirm", confirmation)
+    monkeypatch.setattr(bench.bridge, "stop", AsyncMock(return_value=False))
+    await bench.command("pilot", "auto_home_confirm", confirmation)
+    await settle(bench)
+    assert bench.auto["state"] == "manual_return" and not bench.armed
+    assert not any("Pilot confirmed material delivered" in item["message"] for item in bench.events)
+
+
+async def test_automatic_return_cannot_bypass_manual_delivery(bench):
+    await arm(bench)
+    with pytest.raises(CommandError, match="manually"):
+        await bench.command("pilot", "auto_return", {"arm_token": bench.arm_token})
+    assert bench.bridge.pulses == []
+
+
+async def test_stop_cancels_search_before_it_starts(bench, monkeypatch):
+    from types import SimpleNamespace
+    mission = AsyncMock()
+    monkeypatch.setattr("bullseye.bench_demo.Autopilot.mission", mission)
+    bench.vision = SimpleNamespace(available=True, summary=lambda: {"available": True})
+    await arm(bench)
+    await bench.command("pilot", "auto_mission", {"color": "red", "arm_token": bench.arm_token})
+    await bench.stop()
+    await settle(bench)
+    assert bench.auto["state"] == "stopped" and not bench.armed
+    mission.assert_not_awaited()

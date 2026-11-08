@@ -6,9 +6,11 @@ in the same frame. White floor is a background class, used by the existing free-
 Red and green are selectable ore targets. Blue is an obstacle, not an ore target; yellow remains
 available as a calibrated material. The selected ore is the approach target. The vision planner
 preview is diagnostic and does not drive by itself.
-Explicit **Autopilot** buttons on `/bench` can drive the connected, enabled rover: approach red or
-green ore, stop and signal the sample with green rover LEDs and a happy response on the connected BLE display, then automatically
-search for the black home flag and return. There is no manual pickup step in this demo.
+The sample mission on `/bench` scans for red or green through a measured 360° turn. When the
+color is absent it relocates a bounded distance using ultrasonic clearance, then scans again.
+It approaches a stable target to about 10 cm using fresh sonar, stops, and disables controls.
+Pick up the material by hand, confirm pickup, carry it to home base, and confirm delivery.
+Green rover LEDs and a happy display signal arrival; they do not confirm physical pickup.
 See the [autonomy plan](AUTONOMY_PLAN.md) for current limits and the exploration roadmap.
 
 ## Quick setup
