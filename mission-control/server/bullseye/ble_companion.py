@@ -66,13 +66,16 @@ class BleCompanionLink(ScooperLink):
         self.heartbeats_sent = self.heartbeats_acknowledged = 0
         self.last_heartbeat_at = None
         self.max_heartbeat_gap_ms = 0
+        self.last_device_boot_id = None
+        self.device_boot_changes = 0
 
     def snapshot(self):
         return {**super().snapshot(), "transport": "ble", "display_updates": self.display_updates,
                 "ble_connected": self.client is not None and self.client.is_connected, "servo_ready": self.servo_ready,
                 "heartbeats_sent": self.heartbeats_sent, "heartbeats_acknowledged": self.heartbeats_acknowledged,
                 "heartbeat_age_ms": None if self.last_heartbeat_at is None else max(0, int((time.monotonic() - self.last_heartbeat_at) * 1000)),
-                "max_heartbeat_gap_ms": self.max_heartbeat_gap_ms}
+                "max_heartbeat_gap_ms": self.max_heartbeat_gap_ms,
+                "device_boot_id": self.last_device_boot_id, "device_boot_changes": self.device_boot_changes}
 
     async def connect(self):
         await self.close()
@@ -112,6 +115,10 @@ class BleCompanionLink(ScooperLink):
             return
         try:
             result, reply, status = decode_status(data)
+            boot = status["boot_id"]
+            if self.last_device_boot_id is not None and boot != self.last_device_boot_id:
+                self.device_boot_changes += 1
+            self.last_device_boot_id = boot
             self._apply(status, allow_servo_fault=True)
             self.servo_ready = status["servo_ready"]
             if not self.servo_ready:

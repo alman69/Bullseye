@@ -368,6 +368,24 @@ async def test_multiple_devices_require_explicit_corebluetooth_id():
         await link.close()
 
 
+async def test_boot_changes_distinguish_device_reset_from_same_boot_reconnect():
+    runtime = Runtime()
+    link = BleCompanionLink(state, runtime_factory=lambda: runtime)
+    try:
+        await link.connect()
+        assert link.snapshot()["device_boot_id"] == 42 and link.device_boot_changes == 0
+        await link.connect()
+        assert link.device_boot_changes == 0
+        await link.close()
+        runtime.peripheral.boot, runtime.peripheral.seq = 43, 0
+        await link.connect()
+        assert link.ready and link.snapshot()["device_boot_id"] == 43 and link.device_boot_changes == 1
+        await link.connect()
+        assert link.device_boot_changes == 1
+    finally:
+        await link.close()
+
+
 async def test_stop_during_connect_does_not_deadlock():
     runtime = Runtime()
     runtime.peripheral.silent = True

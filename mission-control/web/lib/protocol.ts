@@ -88,6 +88,8 @@ export type ScooperState = {
   heartbeats_acknowledged?: number;
   heartbeat_age_ms?: number | null;
   max_heartbeat_gap_ms?: number;
+  device_boot_id?: number | null;
+  device_boot_changes?: number;
 };
 export type CommandPayload = Record<string, unknown>;
 export type LinkLatency = {

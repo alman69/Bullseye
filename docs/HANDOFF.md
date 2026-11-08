@@ -86,10 +86,12 @@ bounded draining of canceled in-flight writes, fixing a CoreBluetooth write
 future collision. Watchdog history and idle-disconnect reporting are corrected;
 the two-second stop timeout is unchanged. The UI shows heartbeat diagnostics and
 labels its diagram as commanded positions. See [physical scooper tests](SCOOPER_TEST.md).
-The operator confirmed left-servo local movement/return on GPIO41. The original
-right servo did not move on GPIO42 despite changing commanded angles, but did
-move after its signal was switched to GPIO41. Both servos can move on that path;
-the GPIO42 path is still under crossover testing. Do not claim both outputs passed.
+Latest operator follow-up: both local `set 1` (left) and `set 2` (right) now
+physically work at 80°, 90° and 110°. An earlier right-output problem resolved
+after troubleshooting, but the operator is unsure which adjustment fixed it;
+do not claim a confirmed root cause. Both small-range local command paths have
+passed; BLE-controlled motion and the full squeeze/release range are not yet
+physically verified.
 The vision baseline work was saved separately on `codex/vision-baseline`,
 commit `70c528c`, before switching to this integration. Vendor firmware and
 the original standalone display/scooper sketches remain preserved.

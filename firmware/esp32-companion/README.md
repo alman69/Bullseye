@@ -135,6 +135,8 @@ overlapping writes could time out/disconnect an otherwise working connection.
 STOP cancellation drains an already-issued write within its existing timeout
 before writing STOP. A stuck write closes the session instead of overlapping.
 The website exposes heartbeat applied/sent counts, last-send age and max gap.
+It also shows observed device boot-ID changes across reconnects (including
+manual resets), allowing a reboot to be distinguished from a BLE-only drop.
 
 Watchdog history is cleared by an explicit STOP/relax or a new accepted move,
 without resuming old motion. Disconnecting after a completed sequence no longer
@@ -202,7 +204,7 @@ Software checks use fake BLE transports and native sanitizer tests. Physical
 upload, BLE permission, combined servo/display operation and range tests remain
 operator-performed; the agent does not flash, open serial or connect live BLE.
 
-Verified November 8, 2026: **165 backend tests**, **57 frontend tests**, native
+Verified November 8, 2026: **166 backend tests**, **58 frontend tests**, native
 sanitizer checks, TypeScript and the production build pass. The combined sketch
 compiles against the installed core/libraries: **680,090 bytes flash (51% of the
 1,310,720-byte app partition)** and **34,404 bytes static RAM (10%; 293,276 bytes

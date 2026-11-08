@@ -61,6 +61,7 @@ export function ScooperPanel({ scooper, canUse, onAction }: Props) {
       {!canUse && <p className="bench-help">Claim controls in the Pilot seat panel to connect. Rover driving can stay disabled.</p>}
       {ble && <p className="bench-help">One BLE connection powers the display updates and scooper controls. Stop the separate send-display.sh sender before connecting here. {ready ? `BLE connected. ${scooper?.display_updates ?? 0} display updates acknowledged.` : "Claim controls, then Connect."}</p>}
       {ble && scooper?.heartbeats_sent != null && <p className="bench-help">Control heartbeats: {scooper.heartbeats_acknowledged ?? 0} applied / {scooper.heartbeats_sent} sent · last send {scooper.heartbeat_age_ms == null ? "pending" : `${scooper.heartbeat_age_ms} ms ago`} · largest gap {scooper.max_heartbeat_gap_ms ?? 0} ms.</p>}
+      {ble && scooper?.device_boot_id != null && <p className="bench-help">S3 boot changes observed: {scooper.device_boot_changes ?? 0} (includes manual resets). Reconnect without resetting to distinguish a BLE drop from a board restart.</p>}
       <p className="bench-help">Squeeze: out 30°, then in 80° past straight down to lift the block. STOP holds the last commanded angles. {ble ? "Rover Wi-Fi is unchanged." : "Legacy standalone scooper uses the rover Wi-Fi."}</p>
       <p className="bench-help">The diagram shows firmware-commanded angles. These servos provide no measured position feedback; observe the mechanism to verify movement.</p>
     </div>

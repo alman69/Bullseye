@@ -75,3 +75,8 @@ it("shows control heartbeat diagnostics and identifies commanded positions", () 
   expect(screen.getByText(/Commanded left 90°/)).toBeTruthy();
   expect(screen.getByText(/no measured position feedback/)).toBeTruthy();
 });
+
+it("reports observed boot changes without claiming they are spontaneous resets", () => {
+  render(<ScooperPanel scooper={{ ...ready, transport: "ble", device_boot_id: 42, device_boot_changes: 1 }} canUse onAction={vi.fn()} />);
+  expect(screen.getByText(/S3 boot changes observed: 1 \(includes manual resets\)/)).toBeTruthy();
+});

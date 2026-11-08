@@ -101,12 +101,60 @@ servo on the signal path that moved the other servo.
 Operator reports on November 8: the left servo moved and returned on GPIO41.
 The original right servo did not visibly move on GPIO42, although status
 reported right 80° then 90°, `ready=1`, `watchdog=0`. After swapping only signal
-leads, that previously stationary servo **did move on GPIO41**. This establishes
-that both servos can move on the tested GPIO41 path, without establishing that
-the GPIO42 path works. The reverse crossover result is still pending.
-Both physical observations and status are needed; a changing angle number alone
-does not count as a motor test passing.
+leads, that previously stationary servo **did move on GPIO41**.
+
+Latest operator follow-up: **both `set 1` and `set 2` now physically work at 80°,
+90° and 110°, with 1 controlling the left servo and 2 the right**. The operator
+is unsure what adjustment restored operation, so do not assign a confirmed
+cause to the earlier stationary output. Both local command paths have now
+passed that reported small-range test. Remote BLE motion and the full
+squeeze/release range still need operator verification.
 
 A cleared watchdog warning never resumes a previous sequence. Only a fresh
 operator action can start another move. No physical pass is claimed until the
 operator reports it.
+
+## Check animation versus an actual reboot
+
+The full-screen face intentionally blinks and automatically cycles five moods
+at four seconds each, returning to Happy about every 20 seconds. That alone is
+not evidence of a reset. With Mission Control stopped, send `status` twice,
+ten seconds apart, without moving anything. Compare `boot=` values and inspect
+any boot/reset messages between them. A changed boot ID means a new firmware
+boot was observed; a repeated expression with an unchanged ID can be animation.
+
+The updated backend also preserves the most recent device boot ID across BLE
+reconnections and counts observed changes. The UI explicitly notes that manual
+resets count too. Reconnect without pressing Reset to distinguish a BLE-only
+drop from a board restart. No motor action is required for this check.
+
+## Progressive range test, only after idle operation is stable
+
+Current configured logical limits are **50°–175° per servo**. The mission's
+squeeze endpoints are **60° and 170°**, with home at 90°. These limits come from
+firmware configuration, not a measurement of safe travel with this linkage.
+
+Keep BLE/server control stopped. Clear the linkage's travel, and send each line
+**individually**, waiting until that move finishes; pasting the whole list only
+replaces targets and does not test each position. `15` is the slew in °/s.
+
+```text
+set 1 90 15
+set 1 80 15
+set 1 60 15
+set 1 90 15
+set 1 110 15
+set 1 140 15
+set 1 170 15
+set 1 90 15
+```
+
+Only if every preceding position is free of binding, the remaining configured
+endpoints are `set 1 50 15`, then back to 90°, and `set 1 175 15`, then back
+to 90°. The 175°→90° return takes about six seconds at this speed. Repeat with
+joint `2` only after joint 1 passes. Stop the test and remove servo power if the
+mechanism binds, buzzes hard, heats or the screen/board actually resets. `stop`
+holds torque and must not be treated as removal of power from a stalled servo.
+
+These commands exercise one servo at a time. They do not establish that the
+supply can run two loaded servos together while BLE and the display are active.
