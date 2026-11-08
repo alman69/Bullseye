@@ -41,7 +41,7 @@ TUNABLE = {
     "detector.min_area_px": (int, 10, 5000),
     "classifier.max_distance": (float, 1.0, 12.0),
     "navigation.aim_deadband": (float, 0.02, 0.4),
-    "navigation.arrive_distance_cm": (float, 5.0, 100.0),
+    "navigation.arrive_distance_cm": (float, 2.0, 100.0),
     "navigation.approach_zone_y": (float, 0.0, 0.3),
     "navigation.search_turn_ms": (int, 100, 1000),
     "navigation.avoid_turn_ms": (int, 100, 1000),

@@ -114,7 +114,7 @@ export const TUNING: { key: string; label: string; min: number; max: number; ste
   { key: "detector.min_area_px", label: "Min block size (px)", min: 10, max: 1000, step: 10, hint: "Smaller finds farther blocks; the ground size check rejects specks." },
   { key: "classifier.max_distance", label: "Classifier strictness", min: 1, max: 12, step: 0.5, hint: "Lower = stricter (more unknown pixels)." },
   { key: "navigation.aim_deadband", label: "Centered within", min: 0.02, max: 0.4, step: 0.01, hint: "Fraction of half the image counted as CENTER." },
-  { key: "navigation.arrive_distance_cm", label: "Stop distance (cm)", min: 5, max: 60, step: 1, hint: "Moves the stop line once the ground is calibrated." },
+  { key: "navigation.arrive_distance_cm", label: "Stop distance (cm)", min: 2, max: 60, step: 1, hint: "Moves the stop line once the ground is calibrated." },
   { key: "navigation.approach_zone_y", label: "Approach zone height", min: 0, max: 0.3, step: 0.01, hint: "Band above the stop line with tiny steps." },
   { key: "navigation.search_turn_ms", label: "Search turn (ms)", min: 100, max: 1000, step: 100, hint: "Measured: 1000 ms ≈ 49° at PWM 60." },
   { key: "navigation.avoid_turn_ms", label: "Avoid turn (ms)", min: 100, max: 1000, step: 100, hint: "Turn used to go around obstacles." },
