@@ -11,6 +11,7 @@ import numpy as np
 
 from bullseye_vision.config import DEFAULTS, load_config, save_config
 from bullseye_vision.detector import CENTER, LEFT, NONE, RIGHT, ColorDetector, HsvRange, direction_for
+from support import clean_config
 
 W, H = 640, 480
 BGR = {"red": (0, 0, 255), "yellow": (0, 230, 230), "green": (0, 200, 0), "blue": (255, 0, 0)}
@@ -35,7 +36,7 @@ def blob(img, center, radius, bgr):
 
 class DetectorTests(unittest.TestCase):
     def setUp(self):
-        self.det = ColorDetector.from_config(load_config(Path(tempfile.gettempdir()) / "missing.json"))
+        self.det = ColorDetector.from_config(clean_config())
 
     def test_each_color_detected_with_correct_center(self):
         for color, bgr in BGR.items():
@@ -181,7 +182,7 @@ class RoverMaskTests(unittest.TestCase):
     def test_masked_region_is_ignored_and_floor_stays_clear(self):
         from types import SimpleNamespace
         from bullseye_vision.pipeline import NavRunner
-        cfg = load_config()
+        cfg = clean_config()
         img = np.full((H, W, 3), 235, np.uint8)                       # white floor
         cv2.rectangle(img, (40, 400), (260, 479), BGR["blue"], -1)      # blue-taped "claw" at the bottom left
         cv2.rectangle(img, (380, 400), (600, 479), BGR["blue"], -1)     # and bottom right
@@ -212,7 +213,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual([p.name for p in Path(tmp).iterdir()], ["config.json"])  # no temp files left
 
     def test_repo_config_matches_defaults_keys(self):
-        cfg = load_config()
+        cfg = clean_config()
         self.assertEqual(set(cfg), set(DEFAULTS))
         for color in ("red", "yellow", "green", "blue"):
             HsvRange.from_dict(cfg["colors"][color])
