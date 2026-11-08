@@ -69,6 +69,7 @@ export type VisionSummary = {
   fov?: { captures: { center?: number; side?: number }; hfov_deg: number | null };
   steps?: { forward: Record<string, number>; turn: Record<string, number> };
   tuning?: Record<string, number>;
+  hsv?: Record<string, { h: number[]; s: number[]; v: number[] }>;
 };
 
 export type MaskView = "off" | "target" | "floor";
@@ -111,7 +112,7 @@ export const CLASS_HEX: Record<string, string> = {
 };
 
 export const TUNING: { key: string; label: string; min: number; max: number; step: number; hint: string }[] = [
-  { key: "floor.s_max", label: "Floor: max saturation", min: 0, max: 120, step: 1, hint: "Raise if floor shows as blocked; lower if cardboard counts as floor." },
+  { key: "floor.s_max", label: "Floor: max saturation", min: 0, max: 255, step: 1, hint: "Raise if floor shows as blocked; lower if cardboard counts as floor." },
   { key: "floor.v_min", label: "Floor: min brightness", min: 0, max: 200, step: 1, hint: "Lower if floor shadows show as blocked." },
   { key: "detector.min_area_px", label: "Min block size (px)", min: 10, max: 1000, step: 10, hint: "Smaller finds farther blocks; the ground size check rejects specks." },
   { key: "classifier.max_distance", label: "Classifier strictness", min: 1, max: 12, step: 0.5, hint: "Lower = stricter (more unknown pixels)." },

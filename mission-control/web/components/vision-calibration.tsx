@@ -2,16 +2,17 @@ import { useState } from "react";
 import { Aperture, Crosshair, Footprints, Ruler, ScanEye, Settings2, SquareDashed } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { VisionUi } from "@/hooks/use-vision-ui";
-import { CAMERA_TUNING, CLASS_HEX, MASK_TOOL, SAMPLE_CLASSES, TUNING, type VisionSummary } from "@/lib/vision";
+import { CAMERA_TUNING, CLASS_HEX, MASK_TOOL, SAMPLE_CLASSES, TUNING, VISION_TARGETS, type VisionSummary } from "@/lib/vision";
 
 type Act = (type: string, payload?: Record<string, unknown>) => Promise<boolean>;
-type Tab = "camera" | "mask" | "colors" | "stop" | "fov" | "steps" | "tuning";
+type Tab = "camera" | "mask" | "hsv" | "colors" | "stop" | "fov" | "steps" | "tuning";
 
 // In the order to do them: camera settings change colors, so set them (and the mask) before sampling.
 const TABS: { id: Tab; label: string; icon: typeof Crosshair }[] = [
   { id: "camera", label: "1 Camera", icon: Aperture },
   { id: "mask", label: "2 Rover mask", icon: SquareDashed },
-  { id: "colors", label: "3 Colors", icon: ScanEye },
+  { id: "hsv", label: "3 HSV colors", icon: ScanEye },
+  { id: "colors", label: "Classifier", icon: ScanEye },
   { id: "stop", label: "Stop line", icon: Ruler },
   { id: "fov", label: "Field of view", icon: Crosshair },
   { id: "steps", label: "Steps", icon: Footprints },
@@ -57,6 +58,7 @@ export function VisionCalibration({
       <div className="vision-tab-body" role="tabpanel">
         {tab === "camera" && <CameraTab key={JSON.stringify(vision.camera?.controls)} vision={vision} canAct={canAct} act={act} />}
         {tab === "mask" && <MaskTab vision={vision} ui={ui} canAct={canAct} act={act} />}
+        {tab === "hsv" && <HsvTab vision={vision} ui={ui} canAct={canAct} act={act} />}
         {tab === "colors" && <ColorsTab vision={vision} ui={ui} canAct={canAct} act={act} />}
         {tab === "stop" && <StopLineTab vision={vision} canAct={canAct} act={act} />}
         {tab === "fov" && <FovTab vision={vision} canAct={canAct} act={act} />}
@@ -124,6 +126,66 @@ function MaskTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: Visio
         {drawing ? "Drag on the video over each claw. " : ""}
         {boxes.length ? `${boxes.length} box(es) masked (shown shaded on the video).` : "No mask yet."}
       </p>
+    </div>
+  );
+}
+
+const HSV_SLIDERS: { key: "h" | "s" | "v"; label: string; max: number }[] = [
+  { key: "h", label: "Hue", max: 179 },
+  { key: "s", label: "Saturation", max: 255 },
+  { key: "v", label: "Brightness", max: 255 },
+];
+
+function HsvTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: VisionUi; canAct: boolean; act: Act }) {
+  const [color, setColor] = useState<string>(vision.target && vision.hsv?.[vision.target] ? vision.target : "red");
+  const saved = vision.hsv?.[color] ?? { h: [0, 179], s: [0, 255], v: [0, 255] };
+  const [draft, setDraft] = useState<{ h: number[]; s: number[]; v: number[] } | null>(null);
+  const range = draft ?? saved;
+  const commit = (next: { h: number[]; s: number[]; v: number[] }) => {
+    setDraft(null);
+    void act("vision_hsv", { color, h: next.h, s: next.s, v: next.v });
+  };
+  return (
+    <div className="vision-tuning">
+      <p className="vision-help">
+        The original fixed-range detector. Pick a color, select the same <b>target chip</b> in the Vision panel, turn on{" "}
+        <b>Mask: target</b>, and move the sliders until only that object lights up. Hue low above hue high wraps around
+        (red). Changes save when you release a slider.
+      </p>
+      {vision.mode !== "hsv" && (
+        <p className="vision-warning" role="alert">
+          The detector is in classifier mode, so these ranges aren’t used yet.{" "}
+          <Button size="sm" disabled={!canAct} onClick={() => void act("vision_mode", { mode: "hsv" })}>Use HSV detector</Button>
+        </p>
+      )}
+      <div className="vision-targets" role="group" aria-label="HSV color">
+        {VISION_TARGETS.map((c) => (
+          <button key={c} type="button" className={`vision-chip ${color === c ? "selected" : ""}`}
+            style={{ "--chip": CLASS_HEX[c] } as React.CSSProperties} aria-pressed={color === c}
+            onClick={() => { setColor(c); setDraft(null); if (canAct) void act("vision_target", { color: c }); }}>
+            {c}
+          </button>
+        ))}
+      </div>
+      {HSV_SLIDERS.map(({ key, label, max }) =>
+        [0, 1].map((i) => (
+          <label key={key + i} className="vision-slider">
+            <span>{label} {i === 0 ? "low" : "high"} <b>{range[key][i]}</b></span>
+            <input
+              type="range" min={0} max={max} step={1} value={range[key][i]} disabled={!canAct}
+              aria-label={`${label} ${i === 0 ? "low" : "high"}`}
+              onChange={(e) => {
+                const next = { h: [...range.h], s: [...range.s], v: [...range.v] };
+                next[key][i] = Number(e.target.value);
+                setDraft(next);
+              }}
+              onPointerUp={() => draft && commit(draft)}
+              onKeyUp={() => draft && commit(draft)}
+            />
+          </label>
+        )),
+      )}
+      {ui.mask === "off" && <p className="vision-note">Tip: set the Vision panel’s mask to “target” to see exactly what matches.</p>}
     </div>
   );
 }

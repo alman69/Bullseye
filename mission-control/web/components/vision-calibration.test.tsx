@@ -52,7 +52,7 @@ describe("VisionCalibration", () => {
     const act = vi.fn().mockResolvedValue(true);
     const view = ui();
     render(<VisionCalibration vision={summary} ui={view} canAct act={act} />);
-    fireEvent.click(screen.getByRole("tab", { name: /Colors/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /Classifier/ }));
     fireEvent.click(screen.getByRole("button", { name: /Floor/ }));
     expect(view.setSamplingClass).toHaveBeenCalledWith("floor");
     fireEvent.click(screen.getByRole("button", { name: "Fit color model" }));
@@ -75,7 +75,7 @@ describe("VisionCalibration", () => {
 
   it("disables editing for viewers", () => {
     render(<VisionCalibration vision={summary} ui={ui()} canAct={false} act={vi.fn()} />);
-    fireEvent.click(screen.getByRole("tab", { name: /Colors/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /Classifier/ }));
     expect((screen.getByRole("button", { name: "Fit color model" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -83,14 +83,24 @@ describe("VisionCalibration", () => {
     const act = vi.fn().mockResolvedValue(true);
     vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<VisionCalibration vision={summary} ui={ui()} canAct act={act} />);
-    fireEvent.click(screen.getByRole("tab", { name: /Colors/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /Classifier/ }));
     fireEvent.click(screen.getByRole("button", { name: "Clear all samples" }));
     expect(act).toHaveBeenCalledWith("vision_clear_samples", {});
   });
 
+  it("sets an HSV range for the chosen color", () => {
+    const act = vi.fn().mockResolvedValue(true);
+    render(<VisionCalibration vision={{ ...summary, mode: "hsv", hsv: { red: { h: [176, 10], s: [100, 255], v: [70, 255] } } }} ui={ui()} canAct act={act} />);
+    fireEvent.click(screen.getByRole("tab", { name: /HSV colors/ }));
+    const satLow = screen.getByLabelText("Saturation low");
+    fireEvent.change(satLow, { target: { value: "120" } });
+    fireEvent.pointerUp(satLow);
+    expect(act).toHaveBeenCalledWith("vision_hsv", { color: "red", h: [176, 10], s: [120, 255], v: [70, 255] });
+  });
+
   it("warns when samples exist but no model is fitted", () => {
     render(<VisionCalibration vision={{ ...summary, model_fitted: false }} ui={ui()} canAct act={vi.fn()} />);
-    fireEvent.click(screen.getByRole("tab", { name: /Colors/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /Classifier/ }));
     expect(screen.getByRole("alert").textContent).toMatch(/not fitted yet/);
   });
 
