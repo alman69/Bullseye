@@ -73,7 +73,14 @@
         "500": 20.9,
         "1000": 49.0
       }
-    }
+    },
+    "far_forward_ms": 1000,
+    "far_bottom_y": 0.55,
+    "mid_forward_ms": 500,
+    "mid_bottom_y": 0.7,
+    "clear_floor_height": 0.6,
+    "glimpse_hfov_deg": 50,
+    "camera_latency_s": 0.15
   },
   "ground": {
     "points": [],

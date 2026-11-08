@@ -68,6 +68,13 @@ class NavSettings:
     turn_max_ms: int = 250              # ... up to this
     forward_ms: int = 300
     slow_forward_ms: int = 150
+    # Without the stop-line calibration (no distance estimate): longer steps while the target is
+    # still high in the image (far away) AND the floor check shows open floor well ahead.
+    far_forward_ms: int = 0             # 0 = off; target bottom edge above far_bottom_y
+    far_bottom_y: float = 0.55
+    mid_forward_ms: int = 0             # 0 = off; target bottom edge above mid_bottom_y
+    mid_bottom_y: float = 0.7
+    clear_floor_height: float = 0.6     # corridor floor must reach this high for far/mid steps
     slow_area_ratio: float = 0.04       # target this large -> shorter forward steps
     arrive_area_ratio: float = 0.08     # target this large and centered -> check arrival
     arrive_distance_cm: float = 20
@@ -185,7 +192,7 @@ class Planner:
         frac = min(1.0, max(0.0, (abs(err) - self.s.aim_deadband) / span))
         return int(round(self.s.turn_min_ms + frac * (self.s.turn_max_ms - self.s.turn_min_ms)))
 
-    def _forward_step(self, det) -> tuple:
+    def _forward_step(self, det, free=None) -> tuple:
         """(duration_ms, note) for one forward step toward the target."""
         dist = getattr(det, "distance_cm_est", None)
         if self.forward_table and dist is not None:
@@ -197,6 +204,13 @@ class Planner:
             return ms, f" About {remaining:.0f} cm to go."
         if self._in_zone(det):
             return self.s.slow_forward_ms, " Inside the approach zone: short step."
+        bottom = self._bottom(det)
+        open_ahead = free is not None and all(free.heights[i] >= self.s.clear_floor_height for i in free.corridor)
+        if open_ahead and bottom is not None:
+            if self.s.far_forward_ms and bottom < self.s.far_bottom_y:
+                return self.s.far_forward_ms, " Target far, floor open: long step."
+            if self.s.mid_forward_ms and bottom < self.s.mid_bottom_y:
+                return self.s.mid_forward_ms, " Target mid-range, floor open: medium step."
         slow = det.area_ratio is not None and det.area_ratio >= self.s.slow_area_ratio
         return (self.s.slow_forward_ms, " Slowing down.") if slow else (self.s.forward_ms, "")
 
@@ -286,7 +300,7 @@ class Planner:
             self.awaiting_distance = True
             return self._action(READ_DISTANCE, "Periodic ultrasonic safety check (walls).")
         self.forward_since_check += 1
-        ms, note = self._forward_step(det)
+        ms, note = self._forward_step(det, free)
         return self._move(FORWARD, ms, "Target centered; path clear." + note)
 
     def _clear_to_target(self, det, free) -> bool:

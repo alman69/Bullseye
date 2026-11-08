@@ -14,6 +14,10 @@ Deliberately simple for the hackathon demo:
     obstacle), it drives toward open floor and spins again, until it finds it or STOP is pressed.
     Before each exploring/avoiding forward step it reads the ultrasonic sensor; a wall closer
     than `wall_distance_cm` turns it toward open floor instead.
+  * Brief sightings count: vision remembers the newest frame where the target was detected,
+    including frames taken while the rover was moving. If the target flashed into view during a
+    move but isn't in the decision frame, it turns back to where it was seen (estimated from the
+    step table and when, during the turn, the frame was taken) and looks again twice.
   * STOP on /bench cancels the task immediately; the step in progress still ends with a STOP.
     It only stops on its own for a fault: no fresh camera frames.
 """
@@ -51,12 +55,53 @@ class Autopilot:
             if self._seq() >= after_seq + 2:          # +2: skip a frame that may have been mid-capture
                 with self.vision.lock:
                     return self.vision._det, self.vision.nav.free
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.02)
         raise AutopilotError("No fresh camera frame. Check the camera and Wi-Fi.")
 
     async def _step(self, move: str, pwm: int, duration_ms: int):
         direction = MOVE_TO_DIRECTION[move]
         await self.bridge.pulse(direction, max(1, min(100, int(pwm))), max(50, min(1000, int(duration_ms))))
+
+    @staticmethod
+    def _table(planner) -> list:
+        return [(0, 0.0)] + list(planner.turn_table)
+
+    def _turn_deg(self, planner, ms: float) -> float:
+        """Degrees turned by a timed turn of `ms`, interpolated from the measured step table."""
+        table = self._table(planner)
+        if len(table) < 2:
+            return ms * 0.049                       # ~49 degrees per second (measured at PWM 60)
+        for (m0, d0), (m1, d1) in zip(table, table[1:]):
+            if ms <= m1:
+                return d0 + (d1 - d0) * (ms - m0) / (m1 - m0)
+        (m0, d0), (m1, d1) = table[-2], table[-1]
+        return d1 + (d1 - d0) * (ms - m1) / (m1 - m0)
+
+    def _turn_ms(self, planner, deg: float) -> float:
+        """Timed turn (ms) for `deg` degrees: the inverse of _turn_deg (capped by the caller)."""
+        table = self._table(planner)
+        if len(table) < 2:
+            return deg / 0.049
+        for (m0, d0), (m1, d1) in zip(table, table[1:]):
+            if deg <= d1:
+                return m0 + (m1 - m0) * (deg - d0) / (d1 - d0)
+        return table[-1][0]
+
+    def _glimpse(self, color: str, after_seq: int, move, planner):
+        """Bearing (degrees, + = right of the current heading) of a sighting newer than `after_seq`."""
+        seen = self.vision.last_seen
+        if not seen or seen["target"] != color or seen["seq"] <= after_seq:
+            return None
+        nav = self.vision.cfg["navigation"]
+        hfov = planner.s.camera_hfov_deg or nav.get("glimpse_hfov_deg", 50)
+        bearing = seen["err"] * hfov / 2.0           # relative to the heading when the frame was taken
+        if move and move["kind"] in ("turn_left", "turn_right"):
+            captured = seen["t"] - nav.get("camera_latency_s", 0.15)
+            span = max(1e-3, move["end"] - move["start"])
+            share_after = min(1.0, max(0.0, (move["end"] - captured) / span))
+            turned = share_after * self._turn_deg(planner, move["ms"])
+            bearing += -turned if move["kind"] == "turn_right" else turned
+        return bearing
 
     # ------------------------------------------------------------ behaviors
     async def _wall_distance(self):
@@ -71,14 +116,37 @@ class Autopilot:
         self.vision.set_target(color)
         planner = self._planner()
         seq = self._seq()
+        decided_seq = seq        # newest frame at the previous decision
+        move = None              # the last move: kind, ms and when the wheels turned
+        relook = 0               # "look again" decisions left after turning back to a glimpse
         steps = 0
         while max_steps is None or steps < max_steps:
             steps += 1
             det, free = await self._fresh_view(seq)
-            # The floor check always guards exploring (so it never drives into a wall); while
-            # approaching a visible target it is only used when obstacle avoidance is on.
-            use_floor = avoid or not (det is not None and det.detected)
-            action = planner.decide(det, free if use_floor else None, None, camera_ok=True)
+            detected = det is not None and det.detected
+            action = None
+            if detected or planner.was_at_line:      # at the stop line, vanishing = arrived (planner decides)
+                relook = 0
+            else:
+                bearing = self._glimpse(color, decided_seq, move, planner)
+                if bearing is not None:
+                    relook = 2
+                    side = "right" if bearing > 0 else "left"
+                    if abs(bearing) >= 3:
+                        ms = max(60, min(1000, round(self._turn_ms(planner, abs(bearing)))))
+                        action = planner._move(f"turn_{side}", ms,
+                                               f"Saw {color} briefly about {abs(bearing):.0f}° {side}: turning back to it.")
+                    else:
+                        action = planner._action("stop", f"Saw {color} briefly straight ahead: looking again.")
+                elif relook > 0:
+                    relook -= 1
+                    action = planner._action("stop", f"Looking again where {color} was seen ({2 - relook}/2).")
+            decided_seq = self._seq()
+            if action is None:
+                # The floor check always guards exploring (so it never drives into a wall); while
+                # approaching a visible target it is only used when obstacle avoidance is on.
+                use_floor = avoid or not detected
+                action = planner.decide(det, free if use_floor else None, None, camera_ok=True)
             if action.kind == "forward" and action.state in ("EXPLORE", "AVOID"):
                 distance = await self._wall_distance()
                 limit = planner.s.wall_distance_cm
@@ -89,8 +157,14 @@ class Autopilot:
                 self.report("arrived", f"Arrived at {color}. {action.reason}")
                 return True
             seq = self._seq()
+            move = None
             if action.kind in MOVE_TO_DIRECTION:
+                started = time.monotonic()
                 await self._step(action.kind, action.pwm, action.duration_ms)
+                wheels = min(1000, max(50, action.duration_ms)) / 1000
+                overhead = max(0.0, time.monotonic() - started - wheels) / 2   # STOP before/after
+                move = {"kind": action.kind, "ms": wheels * 1000,
+                        "start": started + overhead, "end": started + overhead + wheels}
                 seq = self._seq()
         raise AutopilotError(f"Test step limit reached without reaching {color}.")
 

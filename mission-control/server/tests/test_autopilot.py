@@ -114,3 +114,44 @@ def test_bench_requires_enabled_controls(vision):
         with pytest.raises(CommandError):
             await bench.command("pilot", "auto_goto", {"color": "red", "arm_token": None})
     asyncio.run(run())
+
+
+def test_turn_table_roundtrip(vision):
+    pilot = Autopilot(None, vision)
+    planner = pilot._planner()
+    for deg in (5, 20.9, 30, 49):
+        assert abs(pilot._turn_deg(planner, pilot._turn_ms(planner, deg)) - deg) < 0.5
+
+
+def test_glimpse_bearing_accounts_for_the_rest_of_the_turn(vision):
+    pilot = Autopilot(None, vision)
+    planner = pilot._planner()
+    vision.last_seen = {"seq": 10, "t": 5.0, "target": "red", "err": 0.0}
+    move = {"kind": "turn_right", "ms": 1000, "start": 4.5, "end": 5.5}
+    bearing = pilot._glimpse("red", 9, move, planner)               # seen centered 0.35 s into a 1 s right turn
+    assert -40 < bearing < -25                                      # so it's now ~30 degrees to the left
+    assert pilot._glimpse("red", 10, move, planner) is None         # already used
+    assert pilot._glimpse("blue", 9, move, planner) is None         # a different color
+
+
+class GlimpseWorld(World):
+    """The target only flashes into view once, in a frame taken during the first search turn."""
+
+    def __init__(self, vision):
+        super().__init__(vision, block_x=400, visible=False)
+        self.flashed = False
+
+    async def pulse(self, direction, speed, duration_ms):
+        await super().pulse(direction, speed, duration_ms)
+        if not self.flashed and direction in ("left", "right"):
+            self.flashed, self.visible = True, True
+            self.show()
+            self.visible = False
+
+
+def test_turns_back_to_a_brief_sighting(vision):
+    world = GlimpseWorld(vision)
+    with pytest.raises(AutopilotError):
+        asyncio.run(world.drive(Autopilot(world, vision).go_to("red", max_steps=3)))
+    first, second = world.steps[0][0], world.steps[1][0]
+    assert first in ("left", "right") and second == ("left" if first == "right" else "right")

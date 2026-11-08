@@ -178,6 +178,16 @@ class PlannerTests(unittest.TestCase):
         p.decide(det(0.0, bottom=0.9), between, now=0)
         self.assertEqual(p.state, AVOID)
 
+    def test_longer_steps_when_far_and_floor_is_open(self):
+        p = Planner(NavSettings(far_forward_ms=1000, mid_forward_ms=500), use_distance=False)
+        p.state = APPROACH
+        self.assertEqual(p.decide(det(0.0, bottom=0.5), CLEAR, now=0).duration_ms, 1000)     # far
+        self.assertEqual(p.decide(det(0.0, bottom=0.65), CLEAR, now=0).duration_ms, 500)     # mid-range
+        self.assertEqual(p.decide(det(0.0, bottom=0.8), CLEAR, now=0).duration_ms, p.s.forward_ms)  # close
+        partly = free((1, 0.5, 0.5, 0.5, 1))                # floor only open part of the way: no long step
+        self.assertEqual(p.decide(det(0.0, bottom=0.5), partly, now=0).duration_ms, p.s.forward_ms)
+        self.assertEqual(p.decide(det(0.0, bottom=0.5), None, now=0).duration_ms, p.s.forward_ms)
+
     def test_wall_ahead_turns_toward_open_floor(self):
         self.p.state = EXPLORE
         a = self.p.wall_ahead(15, free((1, 1, 0.2, 0.2, 0.2)))

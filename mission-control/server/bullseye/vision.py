@@ -85,6 +85,7 @@ class VisionService:
         self.confusion: dict | None = None
         self.ground_captures: list = []         # [{"distance_cm", "bottom_y", "width"}]
         self.fov_captures: dict = {}            # {"center": error, "side": error}
+        self.last_seen: dict | None = None      # newest frame where the target was detected (autopilot glimpses)
         self._hsv_undo: list = []               # [(color, previous range)] for "Undo" in the HSV tab
         self._times: deque = deque(maxlen=30)
         self._last_frame_at = 0.0
@@ -184,6 +185,9 @@ class VisionService:
             frame = SimpleNamespace(image=image, received_at=time.monotonic())
             action = self.nav.update(frame, det, self.detector, prepared=prepared)
             self._image, self._prepared, self._det = image, prepared, det
+            if det.detected:
+                self.last_seen = {"seq": seq, "t": frame.received_at, "target": self.target,
+                                  "err": float(det.horizontal_error)}
             result = self._result(image, det, action, seq)
         now = time.monotonic()
         self._times.append(now)
