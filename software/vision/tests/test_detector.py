@@ -177,6 +177,26 @@ class DetectorTests(unittest.TestCase):
         self.assertTrue(self.det.detect(img, "red").detected)
 
 
+class RoverMaskTests(unittest.TestCase):
+    def test_masked_region_is_ignored_and_floor_stays_clear(self):
+        from types import SimpleNamespace
+        from bullseye_vision.pipeline import NavRunner
+        cfg = load_config()
+        img = np.full((H, W, 3), 235, np.uint8)                       # white floor
+        cv2.rectangle(img, (40, 400), (260, 479), BGR["blue"], -1)      # blue-taped "claw" at the bottom left
+        cv2.rectangle(img, (380, 400), (600, 479), BGR["blue"], -1)     # and bottom right
+        det = ColorDetector.from_config(cfg, mode="hsv")
+        self.assertTrue(det.detect(img, "blue").detected)               # unmasked: the claws look like targets
+        cfg["rover_mask"] = {"boxes": [[0.05, 0.8, 0.42, 1.0], [0.58, 0.8, 0.95, 1.0]]}
+        det = ColorDetector.from_config(cfg, mode="hsv")
+        result = det.detect(img, "blue")
+        self.assertFalse(result.detected)
+        nav = NavRunner(cfg)
+        nav.update(SimpleNamespace(image=img, received_at=0.0), result, det, now=0.0)
+        self.assertFalse(nav.free.center_blocked)
+        self.assertFalse(any(nav.free.blocked))
+
+
 class ConfigTests(unittest.TestCase):
     def test_roundtrip_and_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -22,6 +22,7 @@ export type VisionFrame = {
   center: [number, number] | null;
   others: [number, number, number, number][];
   deadband: number;
+  mask_boxes?: [number, number, number, number][];
   free: {
     heights: number[];
     blocked: boolean[];
@@ -44,6 +45,9 @@ export type VisionSummary = {
   target?: string;
   mode?: "hsv" | "classifier";
   classes?: string[];
+  model_fitted?: boolean;
+  camera?: { controls: Record<string, number>; url_set: boolean; ok: boolean | null; message: string; at: string | null };
+  rover_mask?: { boxes: [number, number, number, number][] };
   detected?: boolean;
   direction?: string | null;
   horizontal_error?: number | null;
@@ -80,6 +84,16 @@ export type VisionOverlayOptions = {
 
 export const VISION_TARGETS = ["red", "green", "blue", "yellow"] as const;
 
+/** Special "sampling class": dragging adds a rover-mask box instead of color samples. */
+export const MASK_TOOL = "__rover_mask__";
+
+export const CAMERA_TUNING: { key: string; label: string; hint: string }[] = [
+  { key: "saturation", label: "Color saturation", hint: "Under the floodlight, +2 brings washed-out colors back." },
+  { key: "ae_level", label: "Exposure", hint: "Lower (−1 / −2) if bright objects look white." },
+  { key: "brightness", label: "Brightness", hint: "Usually 0." },
+  { key: "contrast", label: "Contrast", hint: "Usually 0 or +1." },
+];
+
 export const SAMPLE_CLASSES: { id: string; label: string; hex: string; key: string }[] = [
   { id: "red", label: "Red", hex: "#f06b7c", key: "1" },
   { id: "green", label: "Green", hex: "#65c79b", key: "2" },
@@ -102,6 +116,8 @@ export const TUNING: { key: string; label: string; min: number; max: number; ste
   { key: "navigation.aim_deadband", label: "Centered within", min: 0.02, max: 0.4, step: 0.01, hint: "Fraction of half the image counted as CENTER." },
   { key: "navigation.arrive_distance_cm", label: "Stop distance (cm)", min: 5, max: 60, step: 1, hint: "Moves the stop line once the ground is calibrated." },
   { key: "navigation.approach_zone_y", label: "Approach zone height", min: 0, max: 0.3, step: 0.01, hint: "Band above the stop line with tiny steps." },
+  { key: "navigation.search_turn_ms", label: "Search turn (ms)", min: 100, max: 1000, step: 100, hint: "Measured: 1000 ms ≈ 49° at PWM 60." },
+  { key: "navigation.avoid_turn_ms", label: "Avoid turn (ms)", min: 100, max: 1000, step: 100, hint: "Turn used to go around obstacles." },
 ];
 
 /** Where an image of size w x h lands inside an element drawn with object-fit: contain. */

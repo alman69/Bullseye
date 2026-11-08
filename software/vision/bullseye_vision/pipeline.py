@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import time
 
+import cv2
+
 from .detector import ColorDetector, Detection
 from .freespace import FloorSettings, analyze_floor
 from .planner import NavSettings, Planner
@@ -36,6 +38,9 @@ class NavRunner:
     def update(self, frame, det: Detection, detector: ColorDetector, now: float | None = None, prepared=None):
         now = time.monotonic() if now is None else now
         exclude = detector.mask(frame.image, det.target_color, prepared=prepared) if det.detected else None
+        rover = detector.ignore_mask(frame.image.shape)   # the rover's own parts count as floor, never as obstacles
+        if rover is not None:
+            exclude = rover if exclude is None else cv2.bitwise_or(exclude, rover)
         floor_mask = detector.class_mask(prepared, self.floor_class)
         self.free = analyze_floor(frame.image, self.floor, exclude, floor_mask=floor_mask)
         if now >= self.next_at:
