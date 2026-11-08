@@ -64,10 +64,33 @@ export type MissionState = {
     hold_id?: string | null;
     distance_status?: "live" | "invalid" | "stale" | "unavailable";
     distance_age_ms?: number | null;
-    auto?: { state: "idle" | "running" | "arrived" | "collected" | "deposited" | "done" | "failed" | "stopped"; message: string };
+    scooper?: ScooperState;
+    auto?: { state: "idle" | "running" | "arrived" | "collected" | "deposited" | "sample_reached" | "home_arrived" | "done" | "failed" | "stopped"; message: string; expression?: "happy" | "auto" | null };
   };
   events: { id: string; at: string; message: string; level: string }[];
   vision?: VisionSummary | null;
+};
+// Combined display/scooper over BLE; legacy standalone HTTP remains optional.
+export type ScooperState = {
+  available: boolean;
+  status: "disconnected" | "connecting" | "ready" | "error";
+  address: string;
+  error: string | null;
+  state: "relaxed" | "holding" | "moving" | "sequence" | null;
+  sequence: string | null;
+  step: string | null;
+  angles: Record<string, number>;
+  busy: string | null;
+  transport?: "ble" | "http";
+  display_updates?: number;
+  ble_connected?: boolean;
+  servo_ready?: boolean | null;
+  heartbeats_sent?: number;
+  heartbeats_acknowledged?: number;
+  heartbeat_age_ms?: number | null;
+  max_heartbeat_gap_ms?: number;
+  device_boot_id?: number | null;
+  device_boot_changes?: number;
 };
 export type CommandPayload = Record<string, unknown>;
 export type LinkLatency = {

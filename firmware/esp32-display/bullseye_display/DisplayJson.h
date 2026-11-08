@@ -17,15 +17,15 @@ inline bool decodeSample(const Frame& frame, Sample& sample) {
   cJSON* root = cJSON_ParseWithLengthOpts(frame.text, frame.length + 1, &end, true);
   if (!root) return false;
   bool valid = cJSON_IsObject(root) && end == frame.text + frame.length;
-  constexpr const char* names[] = {"v", "seq", "distance_cm", "status", "sample_age_ms", "rover_connected", "source"};
+  constexpr const char* names[] = {"v", "seq", "distance_cm", "status", "sample_age_ms", "rover_connected", "source", "expression"};
   unsigned fields = 0;
   for (const cJSON* child = root->child; child && valid; child = child->next) {
     unsigned index = 0;
-    for (; index < 7 && strcmp(child->string ? child->string : "", names[index]); ++index) {}
-    if (index == 7 || fields & (1u << index)) valid = false;
+    for (; index < 8 && strcmp(child->string ? child->string : "", names[index]); ++index) {}
+    if (index == 8 || fields & (1u << index)) valid = false;
     else fields |= 1u << index;
   }
-  valid = valid && fields == 127;
+  valid = valid && (fields == 127 || fields == 255);
   if (valid) {
     const auto field = [root](const char* name) { return cJSON_GetObjectItemCaseSensitive(root, name); };
     uint32_t version = 0, distance = 0;
@@ -33,6 +33,8 @@ inline bool decodeSample(const Frame& frame, Sample& sample) {
     const cJSON* age = field("sample_age_ms");
     const cJSON* status = field("status");
     const cJSON* source = field("source");
+    const cJSON* expression = field("expression");
+    sample.expression = Expression::Auto;
     valid = jsonUint(field("v"), version) && version == 1 && jsonUint(field("seq"), sample.seq, 1) &&
             cJSON_IsBool(field("rover_connected")) && cJSON_IsString(status) && cJSON_IsString(source);
     sample.roverConnected = cJSON_IsTrue(field("rover_connected"));
@@ -42,6 +44,11 @@ inline bool decodeSample(const Frame& frame, Sample& sample) {
             (!sample.hasAge || jsonUint(age, sample.ageMs));
     sample.cm = static_cast<uint16_t>(distance);
     if (valid) {
+      if (expression) {
+        if (!cJSON_IsString(expression)) valid = false;
+        else if (!strcmp(expression->valuestring, "happy")) sample.expression = Expression::Happy;
+        else if (strcmp(expression->valuestring, "auto")) valid = false;
+      }
       if (!strcmp(status->valuestring, "live")) sample.status = Status::Live;
       else if (!strcmp(status->valuestring, "stale")) sample.status = Status::Stale;
       else if (!strcmp(status->valuestring, "invalid")) sample.status = Status::Invalid;

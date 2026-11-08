@@ -165,6 +165,7 @@ class Autopilot:
 
     async def go_to(self, color: str, avoid: bool = False, max_steps: int | None = None) -> bool:
         """Drive to `color` until it arrives. Never gives up; max_steps is only for tests."""
+        color = "black" if color == "home" else color           # palette vision calls the flag "home"
         self.vision.set_target(color)
         planner = self._planner(color)
         seq = self._seq()

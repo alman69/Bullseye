@@ -8,6 +8,12 @@ from .autopilot import Autopilot, AutopilotError
 from .elegoo_bench import DIRECTIONS, validate_pulse
 from .elegoo_probe import FrameParser
 from .mission import CommandError, utc_now
+from .scooper import ScooperLink
+from .ble_companion import BleCompanionLink
+
+# Bench command kind -> scooper firmware command.
+SCOOPER_ACTIONS = {"scooper_squeeze": "squeeze", "scooper_release": "release", "scooper_home": "home"}
+SCOOPER_LABELS = {"squeeze": "Squeeze", "release": "Release", "home": "Straight down"}
 
 
 class FactoryBridge:
@@ -26,7 +32,7 @@ class FactoryBridge:
         self.waiters = {}
         self.write_lock = asyncio.Lock()
         self.io_lock = asyncio.Lock()
-        # Shield RGB LEDs: red by default, green after a sample is collected. N100 STOP clears the
+        # Shield RGB LEDs: red by default, green after reaching the sample. N100 STOP clears the
         # LEDs, so the color is re-sent after every STOP we send (only ever while stopped: an LED
         # command during a timed N2 move would cancel the move's auto-stop).
         self.led = (255, 0, 0)
@@ -235,9 +241,13 @@ class FactoryBridge:
 
 
 class BenchControl:
-    def __init__(self, settings, camera, bridge=None):
+    def __init__(self, settings, camera, bridge=None, scooper=None):
         self.settings, self.camera = settings, camera
         self.bridge = bridge or FactoryBridge(settings.rover_host, settings.rover_port)
+        # One BLE session carries both cached display readings and scooper actions.
+        self.scooper = scooper or (ScooperLink(settings.scooper_url) if settings.scooper_transport == "http" else
+                                   BleCompanionLink(lambda: self.snapshot(), device_id=settings.ble_display_device_id))
+        self.scooper.on_change = self.publish
         self.lock = asyncio.Lock()
         self.pilot = None
         self.lease_until = 0
@@ -275,7 +285,7 @@ class BenchControl:
             "mission_id": None, "started_at": None, "finished_at": None, "review": None,
             "collection_error": None, "capabilities": {key: False for key in ("mission", "manual", "collection", "return")},
             "rover": "connected" if self.bridge.connected else "not_connected", "camera": self.camera.status(),
-            "pilot_id": self.pilot, "led_color": None, "motion": {"linear": 0, "angular": 0},
+            "pilot_id": self.pilot, "led_color": "green" if getattr(self.bridge, "led", None) == (0, 255, 0) else "red", "motion": {"linear": 0, "angular": 0},
             "distance_cm": self.bridge.distance_cm, "last_stop_acknowledged": self.bridge.last_stop_acknowledged,
             "events": list(self.events),
             "vision": self.vision.summary() if self.vision else None,
@@ -285,7 +295,7 @@ class BenchControl:
                       "heartbeats": self.bridge.heartbeats, "max_duration_ms": 1000, "max_speed": 100,
                       "drive_mode": self.drive_mode, "hold_id": self.hold_id,
                       "distance_age_ms": distance_age, "distance_status": distance_status,
-                      "auto": dict(self.auto)},
+                      "scooper": self.scooper.snapshot(), "auto": dict(self.auto)},
         }
 
     def publish(self):
@@ -327,6 +337,18 @@ class BenchControl:
         task = asyncio.create_task(stop_request())
         self.stop_jobs.add(task)
         task.add_done_callback(self.stop_jobs.discard)
+        if latched and (self.scooper.ready or self.scooper.client is not None):
+            # A real STOP also freezes the sticks where they are (they keep holding).
+            stop = self.scooper.request_stop()  # Fence queued motion before releasing the bench lock.
+            async def scooper_stop():
+                try:
+                    if await stop is not True:
+                        self.log("Scooper refused STOP; inspect its reported state.", "warning")
+                except Exception:
+                    self.log("Scooper STOP was not acknowledged; check the scooper.", "warning")
+            job = asyncio.create_task(scooper_stop())
+            self.stop_jobs.add(job)
+            job.add_done_callback(self.stop_jobs.discard)
         self.publish()
 
     async def stop(self, reason="STOP requested. Enable controls to continue."):
@@ -430,6 +452,8 @@ class BenchControl:
                         self.drive_mode = "step"
                         self.log(f"One {self.direction} step requested: PWM {payload['speed']}/255, {payload['duration_ms']} ms.")
                         self.launch(lambda: self.bridge.pulse(payload["direction"], payload["speed"], payload["duration_ms"]), "Step finished. STOP acknowledged in software.")
+                elif kind == "scooper_connect" or kind in SCOOPER_ACTIONS:
+                    raise CommandError("Servo squeezing is retired on this rover. Samples are signalled by LEDs and the display.")
                 elif kind in {"auto_goto", "auto_return", "auto_mission"}:
                     if not self.armed or not self.bridge.connected or self.stopped:
                         raise CommandError("Connect and enable controls first.")
@@ -439,22 +463,21 @@ class BenchControl:
                         raise CommandError("This request is outdated. Use the current controls.")
                     if not self.vision or not self.vision.available:
                         raise CommandError("Vision is not running, so the autopilot can't see.")
-                    avoid = payload.get("avoid") is True
+                    avoid = True  # physical autonomous moves always use obstacle avoidance
                     if kind in ("auto_goto", "auto_mission"):
                         color = payload.get("color")
-                        if color == "blue":
-                            raise CommandError("Blue is the obstacle color, not a mineral.")
-                        if color not in ("red", "green") and not (kind == "auto_goto" and color == "black"):
-                            raise CommandError("Choose red or green.")
+                        color = "home" if color == "black" else color
+                        if color not in ("red", "green") and not (kind == "auto_goto" and color == "home"):
+                            raise CommandError("Choose a red or green sample. Blue is an obstacle.")
                         if kind == "auto_mission":
-                            label = f"Autopilot mission: collect {color}, then return to base"
+                            label = f"Autopilot: reach {color}, signal sample success, then return home"
                             job = lambda pilot: pilot.mission(color, avoid=avoid)
                         else:
                             label = f"Autopilot: go to {color}"
-                            job = lambda pilot: pilot.collect(color, avoid=avoid)
+                            job = lambda pilot: pilot.go_to("black", avoid=avoid) if color == "home" else pilot.collect(color, avoid=avoid)
                         label += " (avoiding obstacles)" if avoid else ""
                     else:
-                        label = "Autopilot: turn around and go to the black flag" + (" (avoiding obstacles)" if avoid else "")
+                        label = "Autopilot: search for the home flag and stop at base" + (" (avoiding obstacles)" if avoid else "")
                         job = lambda pilot: pilot.return_to_base(avoid=avoid)
                     self.direction, self.drive_mode = "auto", "auto"
                     self.log(label + ".")
@@ -479,7 +502,8 @@ class BenchControl:
             self.publish()
 
     def _report(self, state, message):
-        self.auto = {"state": state, "message": message}
+        self.auto = {"state": state, "message": message,
+                     "expression": "happy" if state in ("sample_reached", "collected") else "auto"}
         self.publish()
 
     async def _autopilot(self, job):
@@ -493,7 +517,11 @@ class BenchControl:
         except AutopilotError as error:          # target lost etc.: stop, keep controls enabled
             self._report("failed", str(error))
             self.log(str(error), "warning")
-            await self.bridge.stop()
+            if await self.bridge.stop() is not True:
+                self.latch("Autopilot STOP was not acknowledged. Controls disabled.")
+        except Exception:
+            self._report("failed", "Autopilot bridge action failed. STOP requested; motor state is unverified.")
+            raise
         if self.auto["state"] == "running":
             self._report("done", "Autopilot finished.")
 
@@ -502,6 +530,33 @@ class BenchControl:
             validate_pulse(payload.get("direction"), payload.get("speed"), payload.get("duration_ms") if timed else 300)
         except (ValueError, TypeError):
             raise CommandError("Choose a direction, PWM 1–100, and a button duration of 50–1000 ms.")
+
+    def _scooper_job(self, job):
+        try:
+            self.scooper.launch(job)
+        except RuntimeError:
+            job.close()
+            raise CommandError("The scooper is still answering the last command.")
+
+    async def _scooper_connect(self):
+        await self.scooper.connect()
+        if self.scooper.ready:
+            self.log(f"Scooper connected at {self.scooper.url}; sticks report {self.scooper.state}.", "success")
+        else:
+            self.log(f"Scooper not connected: {self.scooper.error}", "warning")
+        self.publish()
+
+    async def _scooper_command(self, name):
+        try:
+            result = await self.scooper.command(name)
+        except ConnectionError as exc:
+            self.log(f"Scooper link failed: {exc}", "warning")
+        else:
+            if result is True:
+                self.log(f"Scooper: {SCOOPER_LABELS[name]} started.", "success")
+            else:
+                self.log(f"Scooper refused {SCOOPER_LABELS[name]}: {result}", "warning")
+        self.publish()
 
     async def _hold(self, hold_id):
         def current():
@@ -561,5 +616,11 @@ class BenchControl:
                 task.cancel()
         await asyncio.gather(*(task for task in (self.watchdog, self.operation, self.telemetry_task) if task), return_exceptions=True)
         await self.bridge.stop()
+        if self.scooper.ready:
+            await asyncio.gather(self.scooper.request_stop(), return_exceptions=True)
         await self.bridge.close()
         await asyncio.gather(*self.stop_jobs, return_exceptions=True)
+        if self.scooper.task:
+            self.scooper.task.cancel()
+            await asyncio.gather(self.scooper.task, return_exceptions=True)
+        await self.scooper.close()

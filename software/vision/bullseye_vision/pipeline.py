@@ -25,7 +25,7 @@ class NavRunner:
         self.floor = FloorSettings.from_dict(cfg["floor"])
         self.settings = NavSettings.from_dict(cfg["navigation"])
         self.floor_class = cfg.get("classifier", {}).get("floor_class", "floor")
-        # Obstacle colors (the blue obstacles) always count as "not floor", even if they look pale.
+        # Blue obstacles always count as "not floor", even if they look pale.
         self.obstacle_colors = list(cfg.get("obstacles", {}).get("colors", ["blue"]))
         self.planner = Planner(self.settings, use_distance=False,
                                stop_line_y=cfg.get("ground", {}).get("stop_line_y"))

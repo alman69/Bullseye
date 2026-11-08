@@ -49,7 +49,7 @@ class Simulator:
         if self.fail_next_collection:
             self.fail_next_collection = False
             raise RuntimeError("Simulated LED acknowledgement failed. Please retry collection.")
-        self.led_color = color
+        self.led_color = "green"
 
     async def begin_return(self):
         pass

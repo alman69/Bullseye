@@ -69,7 +69,7 @@ async def test_pings_do_not_prevent_pilot_lease_expiry(control):
 
 async def test_full_mission_rejects_stale_and_duplicate_decisions(control):
     await control.command("pilot", "claim", {})
-    await control.command("pilot", "select_target", {"color": "blue"})
+    await control.command("pilot", "select_target", {"color": "green"})
     old = await launch_to_review(control)
     frozen = control.snapshots[old["id"]]
     control.camera.publish(b"new camera frame")
@@ -88,7 +88,7 @@ async def test_full_mission_rejects_stale_and_duplicate_decisions(control):
     with pytest.raises(CommandError):
         await control.command("pilot", "confirm", review_payload(current))
     await wait_until(lambda: control.phase == "collected")
-    assert control.adapter.led_color == "blue"
+    assert control.adapter.led_color == "green"
     await control.command("pilot", "return", {})
     await control.command("pilot", "drive", {"linear": .25, "angular": 0})
     await control.command("pilot", "mark_home", {})

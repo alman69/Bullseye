@@ -166,3 +166,12 @@ it("clears a physically held key on disconnect and never resumes it after reconn
   await flushReact(async () => { fireEvent.keyDown(window, { key: "w", code: "KeyW" }); });
   expect(act).toHaveBeenLastCalledWith("hold_start", expect.objectContaining({ arm_token: "reconnected" }));
 });
+
+it("omits scooper controls even when the backend reports a ready scooper", () => {
+  state.bench!.armed = false;
+  state.bench!.scooper = { available: true, status: "ready", address: "http://192.168.4.50", error: null, state: "holding", sequence: null, step: null, angles: { left: 90, right: 90 }, busy: null };
+  render(<RoverDemo />);
+  expect(screen.queryByRole("button", { name: "Squeeze" })).toBeNull();
+  expect(screen.queryByRole("region", { name: /scooper/i })).toBeNull();
+  expect(act).not.toHaveBeenCalled();
+});
