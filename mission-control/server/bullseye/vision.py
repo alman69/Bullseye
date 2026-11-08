@@ -28,6 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import httpx
 
@@ -45,9 +46,7 @@ TUNABLE = {
     "navigation.approach_zone_y": (float, 0.0, 0.3),
     "navigation.search_turn_ms": (int, 100, 1000),
     "navigation.avoid_turn_ms": (int, 100, 1000),
-    "black.v_max": (int, 10, 150),          # the home-base black flag: max brightness counted as "black"
 }
-TARGETS = ("red", "green", "blue", "yellow", "black")
 # Camera sensor settings sent to the ESP32's /control endpoint (runtime only, reset on power-off;
 # no firmware change). Under the floodlight: more saturation and less exposure keep colors visible.
 CAMERA_CONTROLS = {"saturation": (-2, 2), "ae_level": (-2, 2), "brightness": (-2, 2), "contrast": (-2, 2)}
@@ -65,9 +64,9 @@ def _import_vision(package_dir: Path = PACKAGE_DIR):
         sys.path.insert(0, str(package_dir))
     importlib.import_module("cv2")      # fail early with a clear message if OpenCV is missing
     importlib.import_module("numpy")
-    from bullseye_vision import colorclass, config, detector, ground, pipeline
+    from bullseye_vision import colorclass, config, detector, ground, pipeline, palette
     return SimpleNamespace(colorclass=colorclass, config=config, detector=detector,
-                           ground=ground, pipeline=pipeline)
+                           ground=ground, pipeline=pipeline, palette=palette)
 
 
 class VisionService:
@@ -85,8 +84,7 @@ class VisionService:
         self.confusion: dict | None = None
         self.ground_captures: list = []         # [{"distance_cm", "bottom_y", "width"}]
         self.fov_captures: dict = {}            # {"center": error, "side": error}
-        self.last_seen: dict | None = None      # newest frame where the target was detected (autopilot glimpses)
-        self._hsv_undo: list = []               # [(color, previous range)] for "Undo" in the HSV tab
+        self.last_seen = None
         self._times: deque = deque(maxlen=30)
         self._last_frame_at = 0.0
         self._camera_busy = False
@@ -94,6 +92,9 @@ class VisionService:
         self.control_url = f"{parsed.scheme}://{parsed.hostname}/control" if parsed and parsed.hostname else None
         self.camera_status = {"ok": None, "message": "Not sent yet.", "at": None}
         self._image = self._prepared = self._det = None
+        self._processed_at = 0.0
+        self._snapshots = {}
+        self.palette_undo = []
         try:
             self.v = _import_vision()
             self._load()
@@ -119,6 +120,7 @@ class VisionService:
         self.v.config.save_config(self.cfg, self.config_path)
         self._load()
         self.samples, self.undo = samples, undo
+        self._prepared = self.detector.prepare(self._image) if self._image is not None else None
 
     async def start(self):
         if self.available:
@@ -140,9 +142,10 @@ class VisionService:
         self.subscribers.discard(queue)
 
     def set_target(self, color: str) -> None:
-        if color != self.target:
-            self.target = color
-            with self.lock:
+        color = "home" if color == "black" else color
+        with self.lock:
+            if color != self.target:
+                self.target = color
                 if self.available:
                     self.nav.reset()
 
@@ -186,16 +189,16 @@ class VisionService:
             action = self.nav.update(frame, det, self.detector, prepared=prepared)
             self._image, self._prepared, self._det = image, prepared, det
             if det.detected:
-                self.last_seen = {"seq": seq, "t": frame.received_at, "target": self.target,
-                                  "err": float(det.horizontal_error)}
+                self.last_seen = {"seq": seq, "t": frame.received_at, "target": self.target, "err": float(det.horizontal_error)}
+            self._processed_at = time.monotonic()
             result = self._result(image, det, action, seq)
-        now = time.monotonic()
-        self._times.append(now)
-        result["processing_ms"] = round((time.perf_counter() - t0) * 1000, 1)
-        result["fps"] = round((len(self._times) - 1) / (self._times[-1] - self._times[0]), 1) \
-            if len(self._times) > 1 and self._times[-1] > self._times[0] else 0.0
-        self.latest = result
-        return result
+            now = time.monotonic()
+            self._times.append(now)
+            result["processing_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            result["fps"] = round((len(self._times) - 1) / (self._times[-1] - self._times[0]), 1) \
+                if len(self._times) > 1 and self._times[-1] > self._times[0] else 0.0
+            self.latest = result
+            return result
 
     def _result(self, image, det, action, seq) -> dict:
         h, w = image.shape[:2]
@@ -222,11 +225,99 @@ class VisionService:
                     "action": action.to_dict() if action else None,
                     "label": action.label() if action else None},
             "mask_boxes": self.detector.ignore_boxes,
+            "mask_polygons": self.detector.ignore_polygons,
+            "materials": self._materials(image),
             "lines": {"stop": stop,
                       "zone": None if stop is None else round(stop - self.cfg["navigation"]["approach_zone_y"], 4),
                       "horizon": ground.get("horizon_y")},
             "wb": None if self.detector.wb is None else [round(float(g), 3) for g in self.detector.wb.gains],
         }
+
+    def _materials(self, image):
+        if self.detector.mode != "palette":
+            return {}
+        h, w = image.shape[:2]
+        result = {}
+        for name in self.v.palette.OBJECTS:
+            det = self.detector.detect(image, name, prepared=self._prepared)
+            result[name] = {"detected": det.detected, "count": det.candidates,
+                            "boxes": [[round(c.bbox[0] / w, 4), round(c.bbox[1] / h, 4),
+                                       round(c.bbox[2] / w, 4), round(c.bbox[3] / h, 4)]
+                                      for c in det.all_candidates[:8]]}
+        return result
+
+    def calibration_frame(self):
+        """Freeze exactly the pixels the operator samples; bounded independent browser snapshots."""
+        import base64
+        import copy
+        import cv2
+        with self.lock:
+            self._need_frame()
+            if time.monotonic() - self._processed_at > 3 or self.latest is None:
+                raise CommandError("Camera frame is stale. Reconnect the camera before calibrating.")
+            key = uuid4().hex
+            self._snapshots[key] = self._image.copy()
+            while len(self._snapshots) > 8:
+                del self._snapshots[next(iter(self._snapshots))]
+            # PNG preserves the exact pixels used for sampling (no second JPEG color shift).
+            ok, buf = cv2.imencode(".png", self._image)
+            if not ok:
+                raise CommandError("Could not freeze the camera frame.")
+            return {"id": key, "image": "data:image/png;base64," + base64.b64encode(buf).decode(),
+                    "frame": copy.deepcopy(self.latest)}
+
+    def _cmd_palette_sample(self, p):
+        import copy
+        import numpy as np
+        name = p.get("cls")
+        if name not in self.v.palette.CLASSES:
+            raise CommandError("Choose an arena color, wall, home base, or floor.")
+        image = self._snapshots.get(str(p.get("frame_id")))
+        if image is None:
+            raise CommandError("Freeze a new frame before sampling; this snapshot has expired.")
+        x0, y0, x1, y1 = self._box(p)
+        h, w = image.shape[:2]
+        pixels = image[round(y0*h):round(y1*h), round(x0*w):round(x1*w)].reshape(-1, 3)
+        ignore = self.detector.ignore_mask(image.shape)
+        if ignore is not None:
+            pixels = pixels[ignore[round(y0*h):round(y1*h), round(x0*w):round(x1*w)].reshape(-1) == 0]
+        try:
+            profile = self.v.palette.fit_patch(pixels, name)
+        except ValueError as error:
+            raise CommandError(str(error)) from None
+        profiles = self.cfg.setdefault("palette", {}).setdefault("profiles", {})
+        if len(profiles.get(name, [])) >= 8:
+            raise CommandError("Eight samples already saved for this material. Reset it before resampling.")
+        self.palette_undo.append(copy.deepcopy(profiles))
+        self.palette_undo = self.palette_undo[-20:]
+        profiles.setdefault(name, []).append(profile)
+        self.cfg["classifier"]["mode"] = "palette"
+        self._reload()
+        self.message = f"{name.capitalize()} calibrated and saved. Resume live to check the result."
+
+    def _cmd_palette_reset(self, p):
+        import copy
+        name = p.get("cls")
+        if name is not None and name not in self.v.palette.CLASSES:
+            raise CommandError("Unknown arena material.")
+        profiles = self.cfg.setdefault("palette", {}).setdefault("profiles", {})
+        self.palette_undo.append(copy.deepcopy(profiles))
+        self.palette_undo = self.palette_undo[-20:]
+        if name:
+            profiles.pop(name, None)
+        else:
+            profiles.clear()
+        self.cfg["classifier"]["mode"] = "palette"
+        self._reload()
+        self.message = f"Restored built-in colors for {name or 'all materials'}."
+
+    def _cmd_palette_undo(self, p):
+        if not self.palette_undo:
+            raise CommandError("No color calibration to undo.")
+        self.cfg.setdefault("palette", {})["profiles"] = self.palette_undo.pop()
+        self.cfg["classifier"]["mode"] = "palette"
+        self._reload()
+        self.message = "Undid the last color calibration."
 
     # ------------------------------------------------------------ camera settings
     def _controls(self) -> dict:
@@ -270,7 +361,10 @@ class VisionService:
             "classes": list(model.classes) if model else [],
             "model_fitted": model is not None,
             "camera": {"controls": self._controls(), "url_set": bool(self.control_url), **self.camera_status},
-            "rover_mask": {"boxes": self.detector.ignore_boxes},
+            "rover_mask": {"boxes": self.detector.ignore_boxes, "polygons": self.detector.ignore_polygons},
+            "palette": {"counts": {k: len(v) for k, v in self.cfg.get("palette", {}).get("profiles", {}).items()},
+                        "can_undo": bool(self.palette_undo)},
+            "materials": latest.get("materials", {}),
             "detected": bool(det.get("detected")), "direction": det.get("direction"),
             "horizontal_error": det.get("horizontal_error"), "distance_cm_est": det.get("distance_cm_est"),
             "nav_state": nav.get("state"), "nav_label": nav.get("label"),
@@ -285,13 +379,9 @@ class VisionService:
             "fov": {"captures": self.fov_captures, "hfov_deg": self.cfg["navigation"].get("camera_hfov_deg")},
             "steps": self.cfg["navigation"].get("steps", {"forward": {}, "turn": {}}),
             "tuning": {key: self._get(key) for key in TUNABLE},
-            "hsv": {c: self.cfg["colors"][c] for c in TARGETS if c in self.cfg["colors"]},
-            "hsv_undo": len(self._hsv_undo),
         }
 
     def _get(self, dotted: str):
-        if dotted == "black.v_max":
-            return self.cfg["colors"].get("black", {"v": [0, 60]})["v"][1]
         section, key = dotted.split(".")
         return self.cfg[section][key]
 
@@ -308,7 +398,15 @@ class VisionService:
 
     def _locked(self, handler, payload):
         with self.lock:
-            handler(payload)
+            try:
+                handler(payload)
+            except self.v.config.ConfigConflictError as error:
+                self._load()
+                self.palette_undo.clear()
+                self._snapshots.clear()
+                self._prepared = self.detector.prepare(self._image) if self._image is not None else None
+                self.message = "Reloaded calibration changed by another server or checkout. Nothing was overwritten. Retry your change on a new frozen image."
+                raise CommandError(self.message) from error
 
     def _need_frame(self):
         if self._image is None:
@@ -316,8 +414,9 @@ class VisionService:
 
     def _cmd_target(self, p):
         color = p.get("color")
-        if color not in TARGETS:
-            raise CommandError("Choose red, green, blue, yellow or black.")
+        color = "home" if color == "black" else color
+        if color not in ("red", "green", "home"):
+            raise CommandError("Choose a red or green sample, or home. Blue is an obstacle.")
         self.target = color
         self.nav.reset()
 
@@ -388,7 +487,7 @@ class VisionService:
 
     def _cmd_mode(self, p):
         mode = p.get("mode")
-        if mode not in ("auto", "classifier", "hsv"):
+        if mode not in ("auto", "classifier", "hsv", "palette"):
             raise CommandError("Mode must be auto, classifier or hsv.")
         if mode == "classifier" and not self.model_path.exists():
             raise CommandError("Fit a color model first.")
@@ -485,12 +584,6 @@ class VisionService:
         kind, lo, hi = TUNABLE[key]
         if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or not lo <= value <= hi:
             raise CommandError(f"{key} must be between {lo} and {hi}.")
-        if key == "black.v_max":
-            black = self.cfg["colors"].setdefault("black", {"h": [0, 179], "s": [0, 255], "v": [0, 60]})
-            black["v"] = [0, kind(value)]
-            self._reload()
-            self.message = f"Black flag: brightness up to {kind(value)}"
-            return
         section, name = key.split(".")
         self.cfg[section][name] = kind(value)
         if key == "navigation.arrive_distance_cm" and len(self.cfg["ground"].get("points") or []) >= 2:
@@ -499,131 +592,6 @@ class VisionService:
         self._reload()
         self.message = f"{key} = {kind(value)}"
 
-    def _cmd_hsv(self, p):
-        """Set one color's HSV range (OpenCV H 0-179, S/V 0-255). H low > H high wraps (red)."""
-        color = p.get("color")
-        if color not in TARGETS:
-            raise CommandError("Choose red, green, blue, yellow or black.")
-        clean = {}
-        for key, top in (("h", 179), ("s", 255), ("v", 255)):
-            pair = p.get(key)
-            if not (isinstance(pair, list) and len(pair) == 2 and all(
-                    isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= top for x in pair)):
-                raise CommandError(f"{key.upper()} must be two whole numbers from 0 to {top}.")
-            if key != "h" and pair[0] > pair[1]:
-                raise CommandError(f"{key.upper()} low must not be above {key.upper()} high.")
-            clean[key] = list(pair)
-        self.cfg["colors"][color] = clean
-        self._reload()
-        self.message = f"HSV {color}: H {clean['h']} S {clean['s']} V {clean['v']}"
-
-    # Which pixels inside a taught box count as the color ("the green-looking ones"), so a box
-    # that also covers some floor or wall doesn't teach those. (H low, H high, S min); red wraps.
-    TEACH_FAMILY = {"red": (165, 12, 50), "yellow": (15, 40, 60), "green": (30, 95, 30), "blue": (85, 140, 30)}
-
-    def _cmd_hsv_teach(self, p):
-        """Widen one color's HSV range so it covers the color inside a box dragged on the video.
-
-        With exact=True the range is *replaced* by what's in the box instead (e.g. black = only
-        as dark as the flag, so lighter shadows stop matching)."""
-        import cv2
-        import numpy as np
-        color = p.get("color")
-        if color not in TARGETS:
-            raise CommandError("Choose red, green, blue, yellow or black.")
-        self._need_frame()
-        x0, y0, x1, y1 = self._box(p)
-        image = self._image
-        hgt, wid = image.shape[:2]
-        hsv = self.detector.to_hsv(image)
-        crop = hsv[int(y0 * hgt):max(int(y1 * hgt), int(y0 * hgt) + 1), int(x0 * wid):max(int(x1 * wid), int(x0 * wid) + 1)]
-        px = crop.reshape(-1, 3).astype(int)
-        H, S, V = px[:, 0], px[:, 1], px[:, 2]
-        exact = p.get("exact") is True
-        if color == "black":
-            # Widen: the darkest part of the box. Exact: the box should sit inside the flag, so all
-            # of it except the brightest 10% (glare, an edge of wall).
-            keep = V <= (np.percentile(V, 90) if exact else min(110, int(np.percentile(V, 60))))
-        else:
-            h0, h1, s_min = self.TEACH_FAMILY[color]
-            in_hue = (H >= h0) | (H <= h1) if h0 > h1 else (H >= h0) & (H <= h1)
-            keep = in_hue & (S >= s_min)
-        sel = px[keep]
-        if len(sel) < 30:
-            raise CommandError(f"Couldn't find {color} in that box. Drag a tighter box right on the {color} object.")
-
-        old = {k: list(v) for k, v in self.cfg["colors"][color].items()}
-        if exact:
-            new = self._exact_range(color, sel)
-        else:
-            new = self._widened_range(color, sel, old)
-        if new == old:
-            self.message = f"{color} already covers that box. No change."
-            return
-        self._finish_teach(color, old, new, image, (x0, y0, x1, y1), "Set" if exact else "Taught")
-
-    @staticmethod
-    def _exact_range(color: str, sel) -> dict:
-        import numpy as np
-        pct = lambda col, q: int(np.percentile(sel[:, col], q))
-        if color == "black":                 # any hue; as gray and as dark as the flag, plus a little margin
-            return {"h": [0, 179], "s": [0, min(255, pct(1, 95) + 10)], "v": [0, min(255, pct(2, 95) + 8)]}
-        s = [max(0, pct(1, 3) - 10), 255]
-        v = [max(0, pct(2, 3) - 10), 255]
-        if color == "red":
-            hues = np.where(sel[:, 0] < 90, sel[:, 0] + 180, sel[:, 0])
-            lo, hi = int(np.percentile(hues, 3)) - 2, int(np.percentile(hues, 97)) + 2
-            h = [lo % 180, hi % 180] if hi - lo < 179 else [0, 179]
-        else:
-            h = [max(0, pct(0, 3) - 2), min(179, pct(0, 97) + 2)]
-        return {"h": h, "s": s, "v": v}
-
-    @staticmethod
-    def _widened_range(color: str, sel, old: dict) -> dict:
-        import numpy as np
-        new = {"s": [min(old["s"][0], int(np.percentile(sel[:, 1], 5))), max(old["s"][1], int(np.percentile(sel[:, 1], 95)))],
-               "v": [min(old["v"][0], int(np.percentile(sel[:, 2], 5))), max(old["v"][1], int(np.percentile(sel[:, 2], 95)))]}
-        h0, h1 = old["h"]
-        if color == "black":
-            new["h"] = [h0, h1]
-        elif h0 > h1:                                                  # red: unwrap hue around 180
-            hues = np.where(sel[:, 0] < 90, sel[:, 0] + 180, sel[:, 0])
-            lo, hi = min(h0, int(np.percentile(hues, 5))), max(h1 + 180, int(np.percentile(hues, 95)))
-            new["h"] = [lo % 180 if lo >= 180 else lo, hi - 180 if hi >= 180 else hi]
-            if hi - lo >= 179:
-                new["h"] = [0, 179]
-        else:
-            new["h"] = [min(h0, int(np.percentile(sel[:, 0], 5))), max(h1, int(np.percentile(sel[:, 0], 95)))]
-        return new
-
-    def _finish_teach(self, color, old, new, image, box, verb):
-        import numpy as np
-        x0, y0, x1, y1 = box
-        hgt, wid = image.shape[:2]
-        self._hsv_undo.append((color, old))
-        del self._hsv_undo[:-10]
-        self.cfg["colors"][color] = new
-        self._reload()
-
-        # How much the new range now matches outside the box (in view, not the rover): too much = undo.
-        mask = self.detector.mask(image, color) > 0
-        inside = np.zeros(mask.shape, bool)
-        inside[int(y0 * hgt):int(y1 * hgt) + 1, int(x0 * wid):int(x1 * wid) + 1] = True
-        rover = self.detector.ignore_mask(image.shape)
-        outside = ~inside if rover is None else (~inside & (rover == 0))
-        spill = 100.0 * mask[outside].mean() if outside.any() else 0.0
-        warn = " That's a lot: undo and drag a tighter box." if spill > 3 else ""
-        self.message = (f"{verb} {color}: H {new['h']} S {new['s']} V {new['v']}. "
-                        f"It now also matches {spill:.1f}% of the rest of the view.{warn}")
-
-    def _cmd_hsv_undo(self, p):
-        if not self._hsv_undo:
-            raise CommandError("Nothing to undo.")
-        color, old = self._hsv_undo.pop()
-        self.cfg["colors"][color] = old
-        self._reload()
-        self.message = f"Undid the last {color} change: H {old['h']} S {old['s']} V {old['v']}."
-
     def _cmd_camera(self, p):
         key, value = p.get("key"), p.get("value")
         if key not in CAMERA_CONTROLS:
@@ -631,9 +599,10 @@ class VisionService:
         lo, hi = CAMERA_CONTROLS[key]
         if not isinstance(value, int) or isinstance(value, bool) or not lo <= value <= hi:
             raise CommandError(f"{key} must be a whole number from {lo} to {hi}.")
+        self._snapshots.clear()  # old lighting/exposure snapshots must never calibrate a new camera preset
         self.cfg["camera"].setdefault("controls", {})[key] = value
         self._reload()
-        self.message = f"Camera {key} = {value}"
+        self.message = f"Camera {key} = {value}. Resume live and resample colors under the new settings."
 
     def _box(self, p) -> list:
         box = p.get("box")
@@ -654,8 +623,33 @@ class VisionService:
         self._reload()
         self.message = f"Rover mask: {len(boxes)} box(es)."
 
+    def _cmd_mask_polygon(self, p):
+        import cv2
+        import numpy as np
+        points = p.get("points")
+        if not isinstance(points, list) or not 3 <= len(points) <= 128:
+            raise CommandError("Trace a closed rover outline with 3–128 points.")
+        if not all(isinstance(pt, list) and len(pt) == 2 and all(
+                isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and 0 <= v <= 1
+                for v in pt) for pt in points):
+            raise CommandError("Mask points must be normalized image coordinates.")
+        if abs(cv2.contourArea(np.array(points, np.float32))) < 0.0001:
+            raise CommandError("Trace a larger area around the rover part.")
+        polygons = self.cfg.setdefault("rover_mask", {}).setdefault("polygons", [])
+        if len(polygons) >= 12:
+            raise CommandError("Up to 12 outlines; undo or clear a mask first.")
+        polygons.append([[round(v, 5) for v in pt] for pt in points])
+        self._reload()
+        self.message = "Rover outline saved. Trace another part or resume live."
+
     def _cmd_mask_undo(self, p):
+        polygons = self.cfg.get("rover_mask", {}).get("polygons", [])
         boxes = self.cfg.get("rover_mask", {}).get("boxes", [])
+        if polygons:
+            polygons.pop()
+            self._reload()
+            self.message = "Removed the last rover outline."
+            return
         if not boxes:
             raise CommandError("No mask boxes to undo.")
         boxes.pop()
@@ -663,7 +657,7 @@ class VisionService:
         self.message = f"Rover mask: {len(boxes)} box(es)."
 
     def _cmd_mask_clear(self, p):
-        self.cfg["rover_mask"] = {"boxes": []}
+        self.cfg["rover_mask"] = {"boxes": [], "polygons": []}
         self._reload()
         self.message = "Rover mask cleared."
 

@@ -2,17 +2,16 @@ import { useState } from "react";
 import { Aperture, Crosshair, Footprints, Ruler, ScanEye, Settings2, SquareDashed } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { VisionUi } from "@/hooks/use-vision-ui";
-import { CAMERA_TUNING, CLASS_HEX, HSV_EXACT, HSV_TOOL, MASK_TOOL, parseHsvTool, SAMPLE_CLASSES, TUNING, VISION_TARGETS, type VisionSummary } from "@/lib/vision";
+import { CAMERA_TUNING, MASK_TOOL, SAMPLE_CLASSES, TUNING, type VisionSummary } from "@/lib/vision";
 
 type Act = (type: string, payload?: Record<string, unknown>) => Promise<boolean>;
-type Tab = "camera" | "mask" | "hsv" | "colors" | "stop" | "fov" | "steps" | "tuning";
+type Tab = "camera" | "mask" | "colors" | "stop" | "fov" | "steps" | "tuning";
 
 // In the order to do them: camera settings change colors, so set them (and the mask) before sampling.
 const TABS: { id: Tab; label: string; icon: typeof Crosshair }[] = [
-  { id: "camera", label: "1 Camera", icon: Aperture },
-  { id: "mask", label: "2 Rover mask", icon: SquareDashed },
-  { id: "hsv", label: "3 HSV colors", icon: ScanEye },
-  { id: "colors", label: "Classifier", icon: ScanEye },
+  { id: "mask", label: "Rover mask", icon: SquareDashed },
+  { id: "colors", label: "Colors", icon: ScanEye },
+  { id: "camera", label: "Camera", icon: Aperture },
   { id: "stop", label: "Stop line", icon: Ruler },
   { id: "fov", label: "Field of view", icon: Crosshair },
   { id: "steps", label: "Steps", icon: Footprints },
@@ -31,16 +30,17 @@ export function VisionCalibration({
   canAct: boolean;
   act: Act;
 }) {
-  const [tab, setTab] = useState<Tab>("camera");
+  const [tab, setTab] = useState<Tab>("colors");
+  const [advanced, setAdvanced] = useState(false);
   if (!vision?.available) return null;
   return (
     <section className="panel vision-calibration" aria-label="Vision calibration">
       <div className="panel-heading">
         <div className="heading-icon"><Settings2 size={16} /><h2>Vision calibration</h2></div>
-        <span className="micro muted">{canAct ? "SAVED TO software/vision" : "CLAIM PILOT CONTROLS TO EDIT"}</span>
+        <span className="micro muted">{canAct ? "CHANGES SAVE AUTOMATICALLY" : "CLAIM PILOT CONTROLS TO EDIT"}</span>
       </div>
       <div className="vision-tabs" role="tablist" aria-label="Calibration steps">
-        {TABS.map(({ id, label, icon: Icon }) => (
+        {TABS.filter((t) => advanced || t.id === "colors" || t.id === "mask").map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             role="tab"
@@ -48,17 +48,24 @@ export function VisionCalibration({
             className={tab === id ? "active" : ""}
             onClick={() => {
               setTab(id);
-              if (id !== "colors" && id !== "mask" && id !== "hsv") ui.setSamplingClass(null);
+              void ui.setSamplingClass(null);
             }}
           >
             <Icon size={13} /> {label}
           </button>
         ))}
       </div>
+      <div className="vision-actions vision-calibration-tools">
+        <Button size="sm" variant="outline" aria-expanded={advanced} onClick={() => {
+          setAdvanced(!advanced); setTab("colors"); void ui.setSamplingClass(null);
+        }}>{advanced ? "Hide advanced settings" : "Advanced settings"}</Button>
+        {ui.frozen && <Button size="sm" onClick={ui.resumeLive}>Resume live</Button>}
+        <span className="vision-note">{ui.freezing ? "Freezing camera…" : ui.frozen ? "FROZEN · samples use this exact image" : "LIVE · choose a color or trace the rover to freeze"}</span>
+      </div>
+      {ui.freezeError && <p className="vision-warning" role="alert">{ui.freezeError}</p>}
       <div className="vision-tab-body" role="tabpanel">
         {tab === "camera" && <CameraTab key={JSON.stringify(vision.camera?.controls)} vision={vision} canAct={canAct} act={act} />}
         {tab === "mask" && <MaskTab vision={vision} ui={ui} canAct={canAct} act={act} />}
-        {tab === "hsv" && <HsvTab vision={vision} ui={ui} canAct={canAct} act={act} />}
         {tab === "colors" && <ColorsTab vision={vision} ui={ui} canAct={canAct} act={act} />}
         {tab === "stop" && <StopLineTab vision={vision} canAct={canAct} act={act} />}
         {tab === "fov" && <FovTab vision={vision} canAct={canAct} act={act} />}
@@ -105,231 +112,42 @@ function CameraTab({ vision, canAct, act }: { vision: VisionSummary; canAct: boo
 }
 
 function MaskTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: VisionUi; canAct: boolean; act: Act }) {
-  const boxes = vision.rover_mask?.boxes ?? [];
+  const count = (vision.rover_mask?.boxes.length ?? 0) + (vision.rover_mask?.polygons?.length ?? 0);
   const drawing = ui.samplingClass === MASK_TOOL;
-  return (
-    <div>
-      <p className="vision-help">
-        Draw boxes over <b>parts of the rover that are always in view</b> (the popsicle-stick gripper and its tape). Vision
-        ignores them for colors, and the floor check treats them as floor, so the claws are never “obstacles” or
-        “blue”. Leave the gap between the claws unmasked: that’s where the mineral ends up.
-      </p>
-      <div className="vision-actions">
-        <Button size="sm" variant={drawing ? "secondary" : "default"} disabled={!canAct} aria-pressed={drawing}
-          onClick={() => ui.setSamplingClass(drawing ? null : MASK_TOOL)}>
-          {drawing ? "Stop drawing" : "Draw mask boxes"}
-        </Button>
-        <Button size="sm" variant="outline" disabled={!canAct || !boxes.length} onClick={() => void act("vision_mask_undo")}>Undo last box</Button>
-        <Button size="sm" variant="outline" disabled={!canAct || !boxes.length} onClick={() => void act("vision_mask_clear")}>Clear mask</Button>
-      </div>
-      <p className="vision-note">
-        {drawing ? "Drag on the video over each claw. " : ""}
-        {boxes.length ? `${boxes.length} box(es) masked (shown shaded on the video).` : "No mask yet."}
-      </p>
+  return <div className="vision-colors">
+    <p className="vision-help">Choose <b>Trace rover outline</b>, then drag around each claw or visible rover part on the frozen image. Release to close and save the outline. Keep the space between the claws clear.</p>
+    <div className="vision-actions">
+      <Button size="sm" disabled={!canAct || ui.freezing} aria-pressed={drawing}
+        onClick={() => void ui.setSamplingClass(drawing ? null : MASK_TOOL)}>{drawing ? "Stop tracing" : "Trace rover outline"}</Button>
+      <Button size="sm" variant="outline" disabled={!canAct || !count} onClick={() => void act("vision_mask_undo")}>Undo last mask</Button>
+      <Button size="sm" variant="outline" disabled={!canAct || !count} onClick={() => void act("vision_mask_clear")}>Clear mask</Button>
     </div>
-  );
-}
-
-const HSV_SLIDERS: { key: "h" | "s" | "v"; label: string; max: number }[] = [
-  { key: "h", label: "Hue", max: 179 },
-  { key: "s", label: "Saturation", max: 255 },
-  { key: "v", label: "Brightness", max: 255 },
-];
-
-function HsvTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: VisionUi; canAct: boolean; act: Act }) {
-  const [color, setColor] = useState<string>(vision.target && vision.hsv?.[vision.target] ? vision.target : "red");
-  const saved = vision.hsv?.[color] ?? { h: [0, 179], s: [0, 255], v: [0, 255] };
-  const [draft, setDraft] = useState<{ h: number[]; s: number[]; v: number[] } | null>(null);
-  const range = draft ?? saved;
-  const tool = parseHsvTool(ui.samplingClass);
-  const teaching = !!tool;
-  const toolFor = (c: string, exact: boolean) => HSV_TOOL + (exact ? HSV_EXACT : "") + c;
-  const commit = (next: { h: number[]; s: number[]; v: number[] }) => {
-    setDraft(null);
-    void act("vision_hsv", { color, h: next.h, s: next.s, v: next.v });
-  };
-  return (
-    <div className="vision-tuning">
-      <p className="vision-help">
-        The original fixed-range detector. Pick a color, select the same <b>target chip</b> in the Vision panel, turn on{" "}
-        <b>Mask: target</b>, and move the sliders until only that object lights up. Hue low above hue high wraps around
-        (red). Changes save when you release a slider.
-      </p>
-      {vision.mode !== "hsv" && (
-        <p className="vision-warning" role="alert">
-          The detector is in classifier mode, so these ranges aren’t used yet.{" "}
-          <Button size="sm" disabled={!canAct} onClick={() => void act("vision_mode", { mode: "hsv" })}>Use HSV detector</Button>
-        </p>
-      )}
-      <div className="vision-targets" role="group" aria-label="HSV color">
-        {VISION_TARGETS.map((c) => (
-          <button key={c} type="button" className={`vision-chip ${color === c ? "selected" : ""}`}
-            style={{ "--chip": CLASS_HEX[c] } as React.CSSProperties} aria-pressed={color === c}
-            onClick={() => {
-              setColor(c);
-              setDraft(null);
-              if (tool) ui.setSamplingClass(toolFor(c, tool.exact));
-              if (canAct) void act("vision_target", { color: c });
-            }}>
-            {c}
-          </button>
-        ))}
-      </div>
-      <div className="vision-actions">
-        <Button size="sm" variant={tool && !tool.exact ? "secondary" : "default"} disabled={!canAct}
-          aria-pressed={!!tool && !tool.exact}
-          onClick={() => ui.setSamplingClass(tool && !tool.exact ? null : toolFor(color, false))}>
-          {tool && !tool.exact ? "Stop teaching" : `Teach ${color} (widen)`}
-        </Button>
-        <Button size="sm" variant={tool?.exact ? "secondary" : "outline"} disabled={!canAct} aria-pressed={!!tool?.exact}
-          onClick={() => ui.setSamplingClass(tool?.exact ? null : toolFor(color, true))}>
-          {tool?.exact ? "Stop teaching" : `Set ${color} exactly`}
-        </Button>
-        <Button size="sm" variant="outline" disabled={!canAct || !vision.hsv_undo} onClick={() => void act("vision_hsv_undo")}>
-          Undo last change
-        </Button>
-      </div>
-      {teaching && (
-        <p className="vision-note">
-          {tool?.exact
-            ? <>Drag a box <b>inside</b> the {color} object. The range is <b>replaced</b> by exactly what’s in the box, so
-              anything lighter or duller (e.g. shadows for black) stops matching.</>
-            : <>Drag a tight box right on the {color} object the camera misses. Its range widens to cover it (it never
-              shrinks).</>}{" "}
-          Watch “also matches … of the rest of the view”: if that’s more than a few %, press Undo.
-        </p>
-      )}
-      {vision.message && <p className="vision-message">{vision.message}</p>}
-      {HSV_SLIDERS.map(({ key, label, max }) =>
-        [0, 1].map((i) => (
-          <label key={key + i} className="vision-slider">
-            <span>{label} {i === 0 ? "low" : "high"} <b>{range[key][i]}</b></span>
-            <input
-              type="range" min={0} max={max} step={1} value={range[key][i]} disabled={!canAct}
-              aria-label={`${label} ${i === 0 ? "low" : "high"}`}
-              onChange={(e) => {
-                const next = { h: [...range.h], s: [...range.s], v: [...range.v] };
-                next[key][i] = Number(e.target.value);
-                setDraft(next);
-              }}
-              onPointerUp={() => draft && commit(draft)}
-              onKeyUp={() => draft && commit(draft)}
-            />
-          </label>
-        )),
-      )}
-      {ui.mask === "off" && <p className="vision-note">Tip: set the Vision panel’s mask to “target” to see exactly what matches.</p>}
-    </div>
-  );
+    <p className="vision-note">{count ? `${count} masked area(s). Existing mask boxes are preserved.` : "No rover mask yet."} Outlines are shaded on the image and ignored for every color, including black.</p>
+  </div>;
 }
 
 function ColorsTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: VisionUi; canAct: boolean; act: Act }) {
-  const counts = vision.sample_counts ?? {};
-  const totalSamples = Object.values(counts).reduce((a, b) => a + b, 0);
-  const confusion = vision.confusion;
-  const columns = confusion ? Object.keys(Object.values(confusion)[0] ?? {}) : [];
-  return (
-    <div className="vision-colors">
-      <p className="vision-help">
-        Pick a class, then <b>drag a tight box</b> on the video inside that object. Do 3–5 boxes per class: near and far,
-        lit and shadowed. For floor include shadows and the darker bottom corners. Then fit.
-      </p>
-      {totalSamples > 0 && !vision.model_fitted && (
-        <p className="vision-warning" role="alert">
-          Samples are collected but <b>not fitted yet</b>: the detector is still using the default HSV colors. Click{" "}
-          <b>Fit color model</b>.
-        </p>
-      )}
-      <div className="vision-classes" role="group" aria-label="Sample class">
-        {SAMPLE_CLASSES.map((c) => (
-          <button
-            key={c.id}
-            type="button"
-            className={`vision-chip ${ui.samplingClass === c.id ? "selected" : ""}`}
-            style={{ "--chip": c.hex } as React.CSSProperties}
-            aria-pressed={ui.samplingClass === c.id}
-            disabled={!canAct}
-            onClick={() => ui.setSamplingClass(ui.samplingClass === c.id ? null : c.id)}
-          >
-            {c.label} <small>{counts[c.id] ?? 0}</small>
-          </button>
-        ))}
-      </div>
-      <p className="vision-note">
-        {ui.samplingClass
-          ? `Sampling ${ui.samplingClass}: drag on the video. Click the chip again to stop.`
-          : "Not sampling. Choose a class to start."}
-      </p>
-      <div className="vision-actions">
-        <Button size="sm" disabled={!canAct} onClick={() => void act("vision_fit")}>Fit color model</Button>
-        <Button size="sm" variant="outline" disabled={!canAct} onClick={() => void act("vision_undo")}>Undo last box</Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!canAct || !ui.samplingClass}
-          onClick={() => void act("vision_clear_samples", { cls: ui.samplingClass })}
-        >
-          Clear {ui.samplingClass ?? "class"}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!canAct || totalSamples === 0}
-          onClick={() => {
-            if (window.confirm("Delete ALL color samples? Do this after changing camera settings, then sample every class again.")) {
-              void act("vision_clear_samples", {});
-            }
-          }}
-        >
-          Clear all samples
-        </Button>
-        <label className="vision-select">
-          Detector
-          <select
-            value={vision.mode === "classifier" ? "classifier" : "hsv"}
-            disabled={!canAct}
-            onChange={(e) => void act("vision_mode", { mode: e.target.value })}
-          >
-            <option value="classifier">Classifier</option>
-            <option value="hsv">HSV (fallback)</option>
-          </select>
-        </label>
-      </div>
-      {confusion && (
-        <div className="vision-confusion" role="table" aria-label="Confusion table">
-          <p className="vision-help">
-            Each row: how that class’s samples were classified. Aim for ≥ 95% on the diagonal and &lt; 2% between a
-            mineral and floor/cardboard/obstacle.
-          </p>
-          <div className="confusion-grid" style={{ gridTemplateColumns: `90px repeat(${columns.length}, 1fr)` }}>
-            <span />
-            {columns.map((c) => <span key={c} className="confusion-head">{c.slice(0, 6)}</span>)}
-            {Object.entries(confusion).map(([row, values]) => (
-              <Row key={row} row={row} values={values} columns={columns} />
-            ))}
-          </div>
-        </div>
-      )}
+  const counts = vision.palette?.counts ?? {};
+  const selected = SAMPLE_CLASSES.find((c) => c.id === ui.samplingClass);
+  return <div className="vision-colors">
+    <p className="vision-help"><b>Pick a color → click inside it.</b> The camera freezes so you can sample precisely. A tight drag-box works too. Calibration applies and saves immediately. Resume live to check it; add a second sample in different lighting if needed.</p>
+    {vision.mode !== "palette" && <p className="vision-warning" role="alert">Legacy detection is active. Sample a color or use built-in colors to switch to the simple palette.</p>}
+    <div className="vision-classes" role="group" aria-label="Sample class">
+      {SAMPLE_CLASSES.map((c) => <button key={c.id} type="button"
+        className={`vision-chip ${ui.samplingClass === c.id ? "selected" : ""}`}
+        style={{ "--chip": c.hex } as React.CSSProperties} aria-pressed={ui.samplingClass === c.id}
+        disabled={!canAct || ui.freezing} onClick={() => void ui.setSamplingClass(ui.samplingClass === c.id ? null : c.id)}>
+        {c.label} <small>{counts[c.id] ? `${counts[c.id]} saved` : "built-in"}</small>
+      </button>)}
     </div>
-  );
-}
-
-function Row({ row, values, columns }: { row: string; values: Record<string, number>; columns: string[] }) {
-  return (
-    <>
-      <span className="confusion-row" style={{ color: CLASS_HEX[row] }}>{row}</span>
-      {columns.map((c) => {
-        const v = values[c] ?? 0;
-        const diagonal = c === row;
-        const bad = diagonal ? v < 0.95 : v >= 0.02;
-        return (
-          <span key={c} className={`confusion-cell ${diagonal ? "diag" : ""} ${bad ? "bad" : ""}`} style={{ opacity: 0.35 + 0.65 * Math.min(1, v * (diagonal ? 1 : 10)) }}>
-            {(v * 100).toFixed(v >= 0.995 || v === 0 ? 0 : 1)}%
-          </span>
-        );
-      })}
-    </>
-  );
+    <p className="vision-note">{selected ? `Sampling ${selected.label}: click a solid patch away from edges and glare.` : "Start with built-in colors. Sample only materials that need adjustment."}</p>
+    <div className="vision-actions">
+      <Button size="sm" variant="outline" disabled={!canAct || !vision.palette?.can_undo} onClick={() => void act("vision_palette_undo")}>Undo calibration</Button>
+      <Button size="sm" variant="outline" disabled={!canAct || !selected} onClick={() => void act("vision_palette_reset", { cls: selected?.id })}>Reset {selected?.label ?? "selected color"}</Button>
+      <Button size="sm" variant="outline" disabled={!canAct} onClick={() => void act("vision_palette_reset", {})}>Use built-in colors</Button>
+    </div>
+    <p className="vision-note">Red and green mark samples. Blue marks obstacles; yellow is another material you can calibrate. Brown marks cardboard walls. Black marks the home flag and stays restricted to near-black pixels. Floor samples help reject tinted floor. Check an empty arena and then all objects before relying on the result.</p>
+  </div>;
 }
 
 function StopLineTab({ vision, canAct, act }: { vision: VisionSummary; canAct: boolean; act: Act }) {
@@ -338,7 +156,7 @@ function StopLineTab({ vision, canAct, act }: { vision: VisionSummary; canAct: b
   return (
     <div>
       <p className="vision-help">
-        Put a <b>{vision.target}</b> block straight ahead, measure from the front bumper, and capture it at each distance
+        Put a <b>{vision.target}</b> block straight ahead, measure from the gripper tips, and capture it at each distance
         (10, 15, 20, 30 cm works well). Then fit: the magenta STOP LINE appears on the video.
       </p>
       <div className="vision-actions">
@@ -443,7 +261,7 @@ function TuningTab({ vision, canAct, act }: { vision: VisionSummary; canAct: boo
   const [draft, setDraft] = useState<Record<string, number>>(values);
   return (
     <div className="vision-tuning">
-      {TUNING.map((t) => (
+      {TUNING.filter((t) => vision.mode !== "palette" || (!t.key.startsWith("classifier.") && !t.key.startsWith("floor."))).map((t) => (
         <label key={t.key} className="vision-slider">
           <span>{t.label} <b>{draft[t.key] ?? "—"}</b></span>
           <input

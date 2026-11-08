@@ -22,6 +22,7 @@ def vision_dir(tmp_path):
     cfg = json.loads((PACKAGE_DIR / "config.json").read_text())
     cfg["camera"]["controls"] = {}                     # start from a blank calibration, not the arena's
     cfg["rover_mask"] = {"boxes": []}
+    cfg["palette"] = {"profiles": {}}  # isolate tests from the operator's live calibration
     cfg["classifier"]["mode"] = "auto"
     (tmp_path / "config.json").write_text(json.dumps(cfg))
     return tmp_path
@@ -103,7 +104,7 @@ def test_sample_validation(vision_dir):
 
 def test_ground_calibration_from_captures(vision_dir):
     svc = service(vision_dir)
-    run(svc, "vision_tune", {"key": "navigation.arrive_distance_cm", "value": 20})   # independent of the arena config
+    svc.cfg["navigation"]["arrive_distance_cm"] = 20  # this fixture's measured stop line
     with pytest.raises(CommandError):
         run(svc, "vision_ground_fit")
     for dist, bottom, size in ((10, 580, 90), (15, 500, 60), (20, 460, 45), (30, 420, 30)):
@@ -201,16 +202,16 @@ def test_api_feed_commands_and_state(vision_dir):
                     if message["type"] == "ack" and message["id"] == rid:
                         return message
 
-            assert ack("vision_target", {"color": "blue"}, "a")["status"] == "rejected"   # not pilot
+            assert ack("vision_target", {"color": "green"}, "a")["status"] == "rejected"   # not pilot
             assert ack("claim", rid="b")["status"] == "accepted"
-            assert ack("vision_target", {"color": "blue"}, "c")["status"] == "accepted"
-            assert app.state.vision.target == "blue"
-            assert ack("select_target", {"color": "yellow"}, "d")["status"] == "accepted"
-            assert app.state.vision.target == "yellow"                    # mission target drives vision
+            assert ack("vision_target", {"color": "green"}, "c")["status"] == "accepted"
+            assert app.state.vision.target == "green"
+            assert ack("select_target", {"color": "red"}, "d")["status"] == "accepted"
+            assert app.state.vision.target == "red"                    # mission target drives vision
             deadline = time.monotonic() + 3
             while time.monotonic() < deadline and not app.state.vision.summary()["detected"]:
                 time.sleep(0.05)
-            assert app.state.vision.summary()["detected"]                 # the simulator's yellow rock
+            assert app.state.vision.summary()["detected"]                 # the simulator's red rock
 
 
 def test_vision_disabled_by_default():
@@ -258,46 +259,105 @@ def test_camera_settings_validated_saved_and_sent(vision_dir, monkeypatch):
     assert "not sent" in sim.summary()["camera"]["message"]
 
 
-def test_hsv_range_command(vision_dir):
+def test_palette_freeze_calibrate_undo_and_reload(vision_dir):
     svc = service(vision_dir)
-    run(svc, "vision_hsv", {"color": "red", "h": [176, 10], "s": [100, 255], "v": [70, 255]})
-    assert svc.summary()["hsv"]["red"] == {"h": [176, 10], "s": [100, 255], "v": [70, 255]}
-    assert json.loads((vision_dir / "config.json").read_text())["colors"]["red"]["h"] == [176, 10]
-    for bad in ({"color": "red", "h": [0, 200], "s": [0, 255], "v": [0, 255]},
-                {"color": "red", "h": [0, 10], "s": [200, 100], "v": [0, 255]},
-                {"color": "purple", "h": [0, 10], "s": [0, 255], "v": [0, 255]}):
+    run(svc, "vision_mode", {"mode": "palette"})
+    svc._process(arena(), 1)
+    frozen = svc.calibration_frame()
+    assert frozen["image"].startswith("data:image/png;base64,")
+    # Live image changes before the click arrives. Sampling must use the frozen red patch.
+    svc._process(arena(color=(220, 30, 30)), 2)
+    run(svc, "vision_palette_sample", {"cls": "red", "box": [0.48, 0.70, 0.52, 0.74], "frame_id": frozen["id"]})
+    assert svc.summary()["palette"]["counts"] == {"red": 1}
+    assert svc.cfg["palette"]["profiles"]["red"][0]["center"][0] < 10
+    restarted = service(vision_dir)
+    assert restarted.summary()["palette"]["counts"] == {"red": 1}
+    assert restarted._process(arena(), 3)["materials"]["red"]["detected"]
+    assert restarted.calibration_frame()["id"] != frozen["id"]
+    with pytest.raises(CommandError, match="expired"):
+        run(restarted, "vision_palette_sample", {"cls": "red", "box": [0.48, 0.70, 0.52, 0.74], "frame_id": frozen["id"]})
+    run(svc, "vision_palette_reset", {"cls": "red"})
+    assert not svc.summary()["palette"]["counts"]
+    run(svc, "vision_palette_undo")
+    assert svc.summary()["palette"]["counts"] == {"red": 1}
+    run(svc, "vision_palette_undo")
+    assert not svc.summary()["palette"]["counts"]
+
+
+def test_palette_snapshot_expiry_and_invalid_samples(vision_dir):
+    svc = service(vision_dir)
+    with pytest.raises(CommandError):
+        svc.calibration_frame()
+    svc._process(arena(), 1)
+    frozen = svc.calibration_frame()
+    for _ in range(8):
+        svc.calibration_frame()
+    with pytest.raises(CommandError, match="expired"):
+        run(svc, "vision_palette_sample", {"cls": "red", "box": [0.48, 0.70, 0.52, 0.74], "frame_id": frozen["id"]})
+    latest = svc.calibration_frame()
+    with pytest.raises(CommandError):
+        run(svc, "vision_palette_sample", {"cls": "red", "box": [0.1, 0.8, 0.2, 0.9], "frame_id": latest["id"]})
+    assert not svc.summary()["palette"]["counts"]
+    svc._processed_at -= 5
+    with pytest.raises(CommandError, match="stale"):
+        svc.calibration_frame()
+
+
+def test_polygon_mask_persists_and_excludes_calibration(vision_dir):
+    svc = service(vision_dir)
+    run(svc, "vision_mode", {"mode": "palette"})
+    run(svc, "vision_mask_polygon", {"points": [[0.4, 0.6], [0.6, 0.6], [0.6, 0.8], [0.4, 0.8]]})
+    result = svc._process(arena(), 1)
+    assert not result["materials"]["red"]["detected"]
+    frozen = svc.calibration_frame()
+    with pytest.raises(CommandError):
+        run(svc, "vision_palette_sample", {"cls": "red", "box": [0.48, 0.70, 0.52, 0.74], "frame_id": frozen["id"]})
+    assert len(service(vision_dir).summary()["rover_mask"]["polygons"]) == 1
+    run(svc, "vision_mask_undo")
+    assert not svc.summary()["rover_mask"]["polygons"]
+    assert svc._process(arena(), 2)["materials"]["red"]["detected"]
+    for points in ([[0, 0], [1, 1]], [[0, 0], [float('nan'), 1], [1, 0]],
+                   [[0, 0], [1.1, 1], [1, 0]], [[0, 0], [0.1, 0.1], [0.2, 0.2]]):
         with pytest.raises(CommandError):
-            run(svc, "vision_hsv", bad)
+            run(svc, "vision_mask_polygon", {"points": points})
 
 
-def test_teach_hsv_from_a_box(vision_dir):
+def test_camera_change_expires_frozen_calibration(vision_dir):
     svc = service(vision_dir)
-    pale_green = (95, 140, 85)                                    # pale green: saturation ~100, below the range
-    svc._process(arena(block_bottom=450, block_x=400, size=80, color=pale_green), 1)
-    run(svc, "vision_hsv", {"color": "green", "h": [50, 85], "s": [150, 255], "v": [60, 255]})
-    svc.set_target("green")
-    assert not svc._process(arena(block_bottom=450, block_x=400, size=80, color=pale_green), 2)["detection"]["detected"]
-    run(svc, "vision_hsv_teach", {"color": "green", "box": [0.47, 0.68, 0.53, 0.74]})   # inside the block
-    taught = svc.summary()["hsv"]["green"]
-    assert taught["s"][0] < 150 and svc.summary()["hsv_undo"] == 1
-    assert svc._process(arena(block_bottom=450, block_x=400, size=80, color=pale_green), 3)["detection"]["detected"]
-    assert "rest of the view" in svc.message
-    run(svc, "vision_hsv_undo")
-    assert svc.summary()["hsv"]["green"] == {"h": [50, 85], "s": [150, 255], "v": [60, 255]}
-    with pytest.raises(CommandError):                             # a box on plain floor teaches nothing
-        run(svc, "vision_hsv_teach", {"color": "green", "box": [0.05, 0.85, 0.15, 0.95]})
+    svc._process(arena(), 1)
+    frozen = svc.calibration_frame()
+    run(svc, "vision_camera", {"key": "saturation", "value": 1})
+    with pytest.raises(CommandError, match="expired"):
+        run(svc, "vision_palette_sample", {"cls": "red", "box": [0.48, 0.70, 0.52, 0.74], "frame_id": frozen["id"]})
 
 
-def test_set_black_exactly_drops_lighter_shadows(vision_dir):
+def test_palette_detects_all_six_simulated_materials(vision_dir):
     svc = service(vision_dir)
-    img = np.full((600, 800, 3), 235, np.uint8)
-    img[:200] = (90, 136, 176)
-    cv2.rectangle(img, (100, 380), (260, 520), (45, 45, 45), -1)       # shadow: dark gray
-    cv2.rectangle(img, (500, 380), (660, 520), (12, 12, 12), -1)       # the flag: much blacker
-    jpeg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 95])[1].tobytes()
-    svc._process(jpeg, 1)
-    run(svc, "vision_hsv_teach", {"color": "black", "box": [0.64, 0.66, 0.81, 0.85], "exact": True})
-    black = svc.summary()["hsv"]["black"]
-    assert black["v"][1] < 40 and "Set black" in svc.message
-    mask = svc.detector.mask(svc._image, "black")
-    assert mask[450, 580] > 0 and mask[450, 180] == 0                    # flag yes, shadow no
+    run(svc, "vision_mode", {"mode": "palette"})
+    result = svc._process(CameraHub(Settings()).render_scene(), 1)
+    assert set(result["materials"]) == {"red", "green", "blue", "yellow", "cardboard", "home"}
+    assert all(material["detected"] for material in result["materials"].values())
+    assert result["mode"] == "palette"
+    assert result["dry_run"] is True
+
+
+def test_calibration_conflict_clears_stale_undo_and_cached_pixels(vision_dir):
+    first = service(vision_dir)
+    first._process(arena(), 1)
+    frozen = first.calibration_frame()
+    run(first, "vision_palette_sample", {"cls": "red", "box": [0.48, 0.70, 0.52, 0.74], "frame_id": frozen["id"]})
+    second = service(vision_dir)
+    second._process(arena(color=(40, 180, 40)), 2)
+    green = second.calibration_frame()
+    run(second, "vision_palette_sample", {"cls": "green", "box": [0.48, 0.70, 0.52, 0.74], "frame_id": green["id"]})
+    saved = (vision_dir / "config.json").read_bytes()
+    old_prepared = first._prepared
+    with pytest.raises(CommandError, match="Reloaded calibration"):
+        run(first, "vision_palette_reset", {"cls": "red"})
+    assert first.summary()["palette"]["counts"] == {"red": 1, "green": 1}
+    assert first._prepared is not old_prepared
+    assert not first._snapshots
+    assert not first.summary()["palette"]["can_undo"]
+    with pytest.raises(CommandError, match="No color calibration to undo"):
+        run(first, "vision_palette_undo")
+    assert (vision_dir / "config.json").read_bytes() == saved

@@ -27,6 +27,7 @@ def frame(block_x=None, size=60, bottom=420, color=(30, 30, 220)):
 def vision(tmp_path):
     cfg = json.loads((PACKAGE_DIR / "config.json").read_text())
     cfg["camera"]["controls"], cfg["rover_mask"] = {}, {"boxes": []}
+    cfg["palette"] = {"profiles": {}}      # built-in palette: the test's pure colors, not the arena's calibrated balls
     (tmp_path / "config.json").write_text(json.dumps(cfg))
     settings = Settings(vision_enabled=True, vision_dir=tmp_path)
     return VisionService(settings, CameraHub(settings))
@@ -133,6 +134,8 @@ def test_glimpse_bearing_accounts_for_the_rest_of_the_turn(vision):
     assert -40 < bearing < -25                                      # so it's now ~30 degrees to the left
     assert pilot._glimpse("red", 10, move, planner) is None         # already used
     assert pilot._glimpse("blue", 9, move, planner) is None         # a different color
+    vision.last_seen = {"seq": 11, "t": 5.0, "target": "home", "err": 0.2}
+    assert pilot._glimpse("black", 10, None, planner) is not None   # the flag is "home" in palette vision
 
 
 class GlimpseWorld(World):

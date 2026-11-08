@@ -110,7 +110,8 @@ class Autopilot:
     def _glimpse(self, color: str, after_seq: int, move, planner):
         """Bearing (degrees, + = right of the current heading) of a sighting newer than `after_seq`."""
         seen = self.vision.last_seen
-        if not seen or seen["target"] != color or seen["seq"] <= after_seq:
+        target = "home" if color == "black" else color          # palette vision names the black flag "home"
+        if not seen or seen["target"] not in (color, target) or seen["seq"] <= after_seq:
             return None
         nav = self.vision.cfg["navigation"]
         hfov = planner.s.camera_hfov_deg or nav.get("glimpse_hfov_deg", 50)

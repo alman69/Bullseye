@@ -8,7 +8,7 @@ export type VisionFrame = {
   w: number;
   h: number;
   target: string;
-  mode: "hsv" | "classifier";
+  mode: "hsv" | "classifier" | "palette";
   dry_run: true;
   detection: {
     detected: boolean;
@@ -22,6 +22,8 @@ export type VisionFrame = {
   center: [number, number] | null;
   others: [number, number, number, number][];
   deadband: number;
+  materials?: Record<string, MaterialDetection>;
+  mask_polygons?: [number, number][][];
   mask_boxes?: [number, number, number, number][];
   free: {
     heights: number[];
@@ -43,11 +45,13 @@ export type VisionSummary = {
   error: string | null;
   dry_run?: boolean;
   target?: string;
-  mode?: "hsv" | "classifier";
+  mode?: "hsv" | "classifier" | "palette";
   classes?: string[];
   model_fitted?: boolean;
   camera?: { controls: Record<string, number>; url_set: boolean; ok: boolean | null; message: string; at: string | null };
-  rover_mask?: { boxes: [number, number, number, number][] };
+  rover_mask?: { boxes: [number, number, number, number][]; polygons?: [number, number][][] };
+  palette?: { counts: Record<string, number>; can_undo: boolean };
+  materials?: Record<string, MaterialDetection>;
   detected?: boolean;
   direction?: string | null;
   horizontal_error?: number | null;
@@ -69,9 +73,10 @@ export type VisionSummary = {
   fov?: { captures: { center?: number; side?: number }; hfov_deg: number | null };
   steps?: { forward: Record<string, number>; turn: Record<string, number> };
   tuning?: Record<string, number>;
-  hsv?: Record<string, { h: number[]; s: number[]; v: number[] }>;
-  hsv_undo?: number;
 };
+
+export type MaterialDetection = { detected: boolean; count: number; boxes: [number, number, number, number][] };
+export type FrozenVision = { id: string; image: string; frame: VisionFrame };
 
 export type MaskView = "off" | "target" | "floor";
 
@@ -81,27 +86,16 @@ export type VisionOverlayOptions = {
   floor: boolean;
   mask: MaskView;
   samplingClass: string | null; // when set, dragging on the video adds samples of this class
+  frozen?: FrozenVision | null;
+  onResumeLive?: () => void;
+  onMaskPolygon?: (points: [number, number][]) => void;
   onSampleBox?: (box: [number, number, number, number]) => void;
 };
 
-export const VISION_TARGETS = ["red", "green", "blue", "yellow", "black"] as const;
-/** What the rover can drive to: the minerals and the black home flag. Blue is the obstacle color. */
-export const NAV_TARGETS = ["red", "green", "black"] as const;
+export const VISION_TARGETS = ["red", "green", "home"] as const;
 
 /** Special "sampling class": dragging adds a rover-mask box instead of color samples. */
 export const MASK_TOOL = "__rover_mask__";
-/** Special "sampling class" prefix: dragging teaches that color's HSV range ("__hsv__:green",
- * or "__hsv__:exact:black" to replace the range with exactly what's in the box). */
-export const HSV_TOOL = "__hsv__:";
-export const HSV_EXACT = "exact:";
-
-/** "__hsv__:exact:black" -> { color: "black", exact: true }; null when not an HSV teach tool. */
-export function parseHsvTool(tool: string | null): { color: string; exact: boolean } | null {
-  if (!tool?.startsWith(HSV_TOOL)) return null;
-  const rest = tool.slice(HSV_TOOL.length);
-  const exact = rest.startsWith(HSV_EXACT);
-  return { color: exact ? rest.slice(HSV_EXACT.length) : rest, exact };
-}
 
 export const CAMERA_TUNING: { key: string; label: string; hint: string }[] = [
   { key: "saturation", label: "Color saturation", hint: "Under the floodlight, +2 brings washed-out colors back." },
@@ -111,30 +105,27 @@ export const CAMERA_TUNING: { key: string; label: string; hint: string }[] = [
 ];
 
 export const SAMPLE_CLASSES: { id: string; label: string; hex: string; key: string }[] = [
-  { id: "red", label: "Red", hex: "#f06b7c", key: "1" },
-  { id: "green", label: "Green", hex: "#65c79b", key: "2" },
-  { id: "blue", label: "Blue", hex: "#79aaf4", key: "3" },
-  { id: "yellow", label: "Yellow", hex: "#f2d15c", key: "4" },
+  { id: "red", label: "Red sample", hex: "#f06b7c", key: "1" },
+  { id: "green", label: "Green sample", hex: "#65c79b", key: "2" },
+  { id: "blue", label: "Blue obstacle", hex: "#79aaf4", key: "3" },
+  { id: "yellow", label: "Yellow material", hex: "#f2d15c", key: "4" },
   { id: "floor", label: "Floor", hex: "#e9e6de", key: "5" },
-  { id: "cardboard", label: "Cardboard", hex: "#c0925e", key: "6" },
-  { id: "obstacle", label: "Obstacle", hex: "#ff9a3d", key: "7" },
+  { id: "cardboard", label: "Brown wall", hex: "#c0925e", key: "6" },
+  { id: "home", label: "Black home base", hex: "#88909d", key: "7" },
 ];
-export const FLAG_HEX = "#8b93a1";
 
-export const CLASS_HEX: Record<string, string> = {
-  ...Object.fromEntries(SAMPLE_CLASSES.map((c) => [c.id, c.hex])),
-  black: FLAG_HEX,
-};
+export const CLASS_HEX: Record<string, string> = Object.fromEntries(
+  SAMPLE_CLASSES.map((c) => [c.id, c.hex]),
+);
 
 export const TUNING: { key: string; label: string; min: number; max: number; step: number; hint: string }[] = [
-  { key: "floor.s_max", label: "Floor: max saturation", min: 0, max: 255, step: 1, hint: "Raise if floor shows as blocked; lower if cardboard counts as floor." },
+  { key: "floor.s_max", label: "Floor: max saturation", min: 0, max: 120, step: 1, hint: "Raise if floor shows as blocked; lower if cardboard counts as floor." },
   { key: "floor.v_min", label: "Floor: min brightness", min: 0, max: 200, step: 1, hint: "Lower if floor shadows show as blocked." },
   { key: "detector.min_area_px", label: "Min block size (px)", min: 10, max: 1000, step: 10, hint: "Smaller finds farther blocks; the ground size check rejects specks." },
   { key: "classifier.max_distance", label: "Classifier strictness", min: 1, max: 12, step: 0.5, hint: "Lower = stricter (more unknown pixels)." },
   { key: "navigation.aim_deadband", label: "Centered within", min: 0.02, max: 0.4, step: 0.01, hint: "Fraction of half the image counted as CENTER." },
   { key: "navigation.arrive_distance_cm", label: "Stop distance (cm)", min: 2, max: 60, step: 1, hint: "Moves the stop line once the ground is calibrated." },
   { key: "navigation.approach_zone_y", label: "Approach zone height", min: 0, max: 0.3, step: 0.01, hint: "Band above the stop line with tiny steps." },
-  { key: "black.v_max", label: "Black flag: max brightness", min: 10, max: 150, step: 5, hint: "Raise if the flag isn't detected; lower if dark corners count as the flag." },
   { key: "navigation.search_turn_ms", label: "Search turn (ms)", min: 100, max: 1000, step: 100, hint: "Measured: 1000 ms ≈ 49° at PWM 60." },
   { key: "navigation.avoid_turn_ms", label: "Avoid turn (ms)", min: 100, max: 1000, step: 100, hint: "Turn used to go around obstacles." },
 ];

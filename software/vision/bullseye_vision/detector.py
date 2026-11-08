@@ -16,7 +16,8 @@ A color region that passes is only a *candidate*; it is not proof that it is a r
 
 Best-candidate rule: the LARGEST passing contour (by contour area).
 
-Two mask sources:
+Three mask sources:
+  * "palette": explicit six-material arena palette with immediate patch calibration.
   * "hsv": fixed HSV range per color (config "colors"), the original method.
   * "classifier": per-pixel material classifier learned from samples
     (colorclass.py, color_model.json), after floor-referenced white balance.
@@ -143,7 +144,7 @@ def direction_for(error: float, deadband: float) -> str:
 
 class ColorDetector:
     def __init__(self, ranges: dict, settings: DetectorSettings | None = None,
-                 model=None, white_balance=None, ground=None, ignore_boxes=None):
+                 model=None, white_balance=None, ground=None, ignore_boxes=None, ignore_polygons=None):
         self.ranges = {name: (r if isinstance(r, HsvRange) else HsvRange.from_dict(r)) for name, r in ranges.items()}
         self.settings = settings or DetectorSettings()
         k = self.settings.morph_kernel
@@ -154,6 +155,7 @@ class ColorDetector:
         # Rover mask: normalized [x0, y0, x1, y1] boxes over parts of the rover itself (e.g. the
         # gripper) that are always in view. Ignored for colors and treated as floor by the floor check.
         self.ignore_boxes = [list(map(float, b)) for b in (ignore_boxes or [])]
+        self.ignore_polygons = ignore_polygons or []
         self._ignore_cache = (None, None)
 
     @classmethod
@@ -169,10 +171,18 @@ class ColorDetector:
             if not model_path.exists():
                 raise FileNotFoundError(f"{model_path} not found: sample colors first (main.py, key k)")
             model = ColorModel.load(model_path)
+            cutoff = float(cc.get("max_distance", model.max_distance))
+            if cutoff != model.max_distance:
+                model = ColorModel(model.classes, model.means, model.covs, cutoff,
+                                   model.reference_floor, model.counts, model.gates)
+        if mode == "palette":
+            from .palette import ArenaPalette
+            model = ArenaPalette(cfg.get("palette", {}).get("profiles"))
         ground = GroundModel.from_dict(cfg.get("ground"))
         det = cls(cfg["colors"], DetectorSettings.from_dict(cfg["detector"]),
                   ground=ground if ground.calibrated else None,
-                  ignore_boxes=cfg.get("rover_mask", {}).get("boxes", []))
+                  ignore_boxes=cfg.get("rover_mask", {}).get("boxes", []),
+                  ignore_polygons=cfg.get("rover_mask", {}).get("polygons", []))
         det.set_model(model, cc)
         return det
 
@@ -187,7 +197,8 @@ class ColorDetector:
 
     @property
     def mode(self) -> str:
-        return "classifier" if self.model is not None else "hsv"
+        from .palette import ArenaPalette
+        return "palette" if isinstance(self.model, ArenaPalette) else "classifier" if self.model is not None else "hsv"
 
     def prepare(self, frame_bgr: np.ndarray):
         """Classifier mode: blur, white-balance and label every pixel once per frame. HSV mode: None."""
@@ -208,15 +219,19 @@ class ColorDetector:
         return None if idx is None else (prepared.labels == idx).astype(np.uint8) * 255
 
     def ignore_mask(self, shape):
-        """0/255 mask of the rover-mask boxes for a frame of this shape, or None if there are none."""
-        if not self.ignore_boxes:
+        """0/255 mask of rover boxes and outlines, or None when no mask is configured."""
+        if not self.ignore_boxes and not self.ignore_polygons:
             return None
         h, w = shape[:2]
-        key = (h, w, tuple(tuple(b) for b in self.ignore_boxes))
+        key = (h, w, tuple(tuple(b) for b in self.ignore_boxes),
+               tuple(tuple(tuple(p) for p in poly) for poly in self.ignore_polygons))
         if self._ignore_cache[0] != key:
             m = np.zeros((h, w), np.uint8)
             for x0, y0, x1, y1 in self.ignore_boxes:
                 m[int(round(y0 * h)):int(round(y1 * h)), int(round(x0 * w)):int(round(x1 * w))] = 255
+            for poly in self.ignore_polygons:
+                points = np.round(np.array(poly) * [w - 1, h - 1]).astype(np.int32)
+                cv2.fillPoly(m, [points], 255)
             self._ignore_cache = (key, m)
         return self._ignore_cache[1]
 
@@ -264,7 +279,7 @@ class ColorDetector:
             m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, self._kernel)
         return self._without_ignored(m)
 
-    def candidates(self, mask: np.ndarray) -> list:
+    def candidates(self, mask: np.ndarray, material=False) -> list:
         """Contours that pass the size/shape filters, largest first."""
         h, w = mask.shape[:2]
         frame_area = float(w * h)
@@ -273,7 +288,7 @@ class ColorDetector:
         out = []
         for c in contours:
             area = cv2.contourArea(c)
-            if area < s.min_area_px or area / frame_area > s.max_area_ratio:
+            if area < s.min_area_px or area / frame_area > (1.0 if material else s.max_area_ratio):
                 continue
             x, y, bw, bh = cv2.boundingRect(c)
             extent = area / float(bw * bh)
@@ -281,7 +296,7 @@ class ColorDetector:
                 continue
             bottom = (y + bh) / float(h)
             distance = None
-            if self.ground is not None:
+            if self.ground is not None and not material:
                 if not self.ground.plausible(bottom, bw / float(w)):
                     continue                     # above the horizon or wrong size for a block there
                 distance = self.ground.distance_cm(bottom)
@@ -300,7 +315,8 @@ class ColorDetector:
         h, w = frame_bgr.shape[:2]
         if prepared is None and self.model is not None:
             prepared = self.prepare(frame_bgr)
-        cands = self.candidates(self.mask(frame_bgr, target_color, prepared=prepared))
+        cands = self.candidates(self.mask(frame_bgr, target_color, prepared=prepared),
+                                material=target_color in ("cardboard", "home"))
         det = Detection(target_color, False, w, h, frame_id=frame_id, timestamp=timestamp,
                         candidates=len(cands), all_candidates=cands)
         if cands:
@@ -320,6 +336,8 @@ class ColorDetector:
         return det
 
     def _range(self, color: str) -> HsvRange:
+        if color == "home" and color not in self.ranges:
+            color = "black"  # legacy HSV compatibility; palette uses the canonical home class
         if color not in self.ranges and self.model is not None:
             raise ValueError(f"unknown color {color!r}; model classes: {', '.join(self.model.classes)}")
         try:

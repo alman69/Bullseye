@@ -1,4 +1,14 @@
-# Bullseye laptop vision (Phase 1)
+# Bullseye laptop vision
+
+**Current default: arena palette.** Red, green, blue and yellow objects, brown cardboard walls,
+and black home-base candidates are detected together in Mission Control. Pick a color and click
+inside it on a frozen frame to calibrate immediately; trace the rover outline to mask the claws.
+See the [current quick-start and verification guide](../../docs/SIMPLE_VISION.md). Existing saved
+camera/ground/step settings and rectangular masks are preserved.
+
+The sections below document the original standalone HSV/classifier tools and historical testing.
+For their slider workflow, explicitly run `--detector hsv`; for palette replay, use
+`--detector palette`. Calibrate the palette through Mission Control.
 
 > **Now built into Mission Control.** The dashboard (`/` and `/bench`) shows the detection
 > overlay, floor strips, stop line and the planner's dry-run move. It also has a
