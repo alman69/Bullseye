@@ -471,7 +471,7 @@ def parse_args(argv=None):
     p.add_argument("--duration", type=float, default=0, help="headless: stop after N seconds")
     p.add_argument("--navigate", action="store_true",
                    help="DRY RUN: show floor check and planned moves; never sends motor commands")
-    p.add_argument("--detector", choices=("auto", "classifier", "hsv"),
+    p.add_argument("--detector", choices=("palette", "auto", "classifier", "hsv"),
                    help="override classifier.mode (auto = classifier when color_model.json exists)")
     p.add_argument("-v", "--verbose", action="store_true")
     return p.parse_args(argv)

@@ -92,6 +92,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("offers only red and green samples as mission objectives", () => {
+  render(<App />);
+  expect(screen.getByRole("button", { name: "Select red sample" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Select green sample" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Select blue sample" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Select yellow sample" })).toBeNull();
+});
+
 it("keeps one camera mounted and stops held motion when leaving the mobile Pilot tab", () => {
   render(<App />);
   const camera = screen.getByTestId("shared-camera");

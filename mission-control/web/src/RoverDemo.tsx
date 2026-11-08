@@ -14,7 +14,8 @@ const SKY = { planetX: 0.74, planetY: 0.2 };
 
 export default function RoverDemo() {
   const { state, connected, isPilot, act, stop, error, clearError, latency } = useMission("/ws/bench", "/api/bench/stop");
-  const visionUi = useVisionUi(act);
+  const canCalibrate = connected && isPilot && !state?.bench?.busy && !state?.bench?.stop_pending;
+  const visionUi = useVisionUi(act, canCalibrate);
   const [speed, setSpeed] = useState(40);
   const [duration, setDuration] = useState(200);
   const stage = useRef<HTMLDivElement>(null);
@@ -65,9 +66,9 @@ export default function RoverDemo() {
         <div className="bench-grid" ref={stage}>
           <div className="bench-left">
             <CameraView state={state} connected={connected} onStop={() => void stop()} vision={state?.vision?.available ? visionUi.overlay : undefined} />
-            {visionUi.calibrating && <VisionCalibration vision={state?.vision} ui={visionUi} canAct={connected && isPilot} act={act} />}
+            {visionUi.calibrating && <VisionCalibration vision={state?.vision} ui={visionUi} canAct={canCalibrate} act={act} />}
             <AutopilotPanel state={state} canStep={canStep} act={act} />
-            <VisionPanel vision={state?.vision} ui={visionUi} canAct={connected && isPilot} act={act} targetControl />
+            <VisionPanel vision={state?.vision} ui={visionUi} canAct={canCalibrate} act={act} targetControl />
             <section className="panel bench-status" aria-label="Connection diagnostics">
               <div><Radio size={17} /><span>Browser → laptop</span><strong>{connected ? latency.rttMs != null ? `${latency.rttMs} ms` : "Connected" : "Disconnected"}</strong><small>Round-trip to this server only</small></div>
               <div><Cable size={17} /><span>ESP32 → UNO</span><strong>{bridgeReady ? "UNO replied" : bench?.status === "connecting" ? "Connecting…" : "Not connected"}</strong><small>{bench?.heartbeats || 0} ESP32 heartbeats echoed</small></div>

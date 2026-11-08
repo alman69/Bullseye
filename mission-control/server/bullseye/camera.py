@@ -121,18 +121,10 @@ class CameraHub:
         image = Image.new("RGB", (800, 450), "#16151d")
         draw = ImageDraw.Draw(image)
         small = ImageFont.load_default(size=14)
-        for y in range(450):
-            k = y / 450
-            draw.line((0, y, 800, y), fill=(int(26 + 35*k), int(24 + 18*k), int(35 + 14*k)))
-        draw.polygon([(0, 170), (90, 135), (170, 183), (270, 120), (390, 181),
-                      (490, 143), (620, 174), (730, 130), (800, 166), (800, 450), (0, 450)], fill="#42343c")
-        draw.polygon([(0, 244), (190, 182), (430, 219), (610, 188), (800, 236),
-                      (800, 450), (0, 450)], fill="#57434a")
-        for i in range(65):
-            x = (i * 137 + 23) % 800
-            y = 225 + (i * 71) % 225
-            r = 1 + i % 3
-            draw.ellipse((x-r*2, y-r, x+r*2, y+r), fill="#6a5055" if i % 2 else "#3d3038")
+        # Match the real arena palette: white floor, brown cardboard, black base.
+        draw.rectangle((0, 0, 800, 190), fill="#b08a5b")
+        draw.rectangle((0, 190, 800, 450), fill="#e9e7e2")
+        draw.polygon([(650, 205), (740, 205), (780, 250), (665, 250)], fill="#202124")
         phase = self.scene["phase"]
         age = self.scene.get("phase_age", 0)
         approaching = phase in {"approaching", "awaiting_confirmation", "collecting", "collected"}
@@ -160,13 +152,13 @@ class CameraHub:
         if approaching:
             draw.rounded_rectangle((310, 235, 490, 410), radius=5, outline=colors[selected][1], width=2)
             draw.text((318, 242), f"{selected.upper()} SAMPLE", font=small, fill="#ffffff")
-        draw.rectangle((0, 0, 800, 43), fill="#15131d")
+        draw.rectangle((0, 0, 800, 43), fill="#ebe7dc")
         draw.ellipse((21, 17, 29, 25), fill="#ef506d")
-        draw.text((300, 13), "SIMULATED CAMERA", font=small, fill="#e7b9c3")
-        draw.text((648, 13), "VIRTUAL ARENA", font=small, fill="#b9a9b4")
-        draw.rectangle((0, 414, 800, 450), fill="#15131d")
-        draw.text((20, 423), "BULLSEYE / TRAINING ENVIRONMENT", font=small, fill="#b2a4ae")
-        draw.text((660, 422), "800 x 450", font=small, fill="#b2a4ae")
+        draw.text((300, 13), "SIMULATED CAMERA", font=small, fill="#554b40")
+        draw.text((648, 13), "VIRTUAL ARENA", font=small, fill="#554b40")
+        draw.rectangle((0, 414, 800, 450), fill="#ebe7dc")
+        draw.text((20, 423), "BULLSEYE / TRAINING ENVIRONMENT", font=small, fill="#554b40")
+        draw.text((660, 422), "800 x 450", font=small, fill="#554b40")
         output = BytesIO()
         image.save(output, "JPEG", quality=78)
         return output.getvalue()

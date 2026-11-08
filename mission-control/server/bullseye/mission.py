@@ -10,7 +10,7 @@ from .camera import CameraHub
 from .config import Settings
 
 
-COLORS = {"red", "green", "blue", "yellow"}
+COLORS = {"red", "green"}
 
 
 def utc_now():
@@ -176,7 +176,7 @@ class MissionControl:
                     self.require_phase("idle", "completed")
                     color = payload.get("color")
                     if color not in COLORS:
-                        raise CommandError("Choose red, green, blue, or yellow.")
+                        raise CommandError("Choose a red or green sample. Blue is an obstacle.")
                     self.target = color
                     if self.vision:
                         self.vision.set_target(color)
@@ -289,7 +289,7 @@ class MissionControl:
                     return
                 self.set_phase("collected")
                 self.collection_error = None
-                self.log(f"Collection acknowledged. Sample indicator set to {self.target}.", "success")
+                self.log("Sample signal acknowledged. LEDs green.", "success")
                 self.publish()
         except asyncio.CancelledError:
             raise

@@ -3,7 +3,7 @@ import { Camera, Expand, Radio, VideoOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { socketUrl } from "@/hooks/use-mission";
 import type { MissionState } from "@/lib/protocol";
-import { VisionOverlay } from "@/components/vision-overlay";
+import { VisionFreezeControls, VisionOverlay } from "@/components/vision-overlay";
 import type { VisionOverlayOptions } from "@/lib/vision";
 
 export function CameraView({
@@ -154,6 +154,7 @@ export function CameraView({
               : "CAMERA NOT CONFIGURED"}
         </span>
       </div>
+      {vision && <VisionFreezeControls {...vision} />}
       <div className="camera-footer">
         <span>
           <Radio size={12} />

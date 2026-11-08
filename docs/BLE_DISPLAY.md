@@ -1,5 +1,11 @@
 # Separate BLE telemetry display
 
+The servo squeeze feature is retired. Use the **standalone display firmware and
+read-only sender** below for telemetry and the ore-arrival happy animation.
+The [combined companion sketch](../firmware/esp32-companion/README.md) remains
+archived/compatible source; it is not needed for this display-only workflow.
+Never run two BLE senders against the same display.
+
 The Mac reads **cached ultrasonic telemetry** from the existing real-rover
 controller and forwards it to a separate ESP32-S3 touchscreen over BLE. It can
 keep Wi-Fi connected to the rover at the same time. Neither the sender nor the
@@ -231,11 +237,29 @@ One UTF-8 JSON object per newline, **maximum 256 bytes including newline**:
 {"v":1,"seq":42,"distance_cm":31,"status":"live","sample_age_ms":180,"rover_connected":true,"source":"rover"}
 ```
 
-All seven fields are required; unknown/duplicate fields, nonintegral numbers,
+The original seven fields are required. One optional field, `"expression"`, accepts
+`"auto"` or `"happy"`; omission means `"auto"`. Unknown/duplicate fields, nonintegral numbers,
 embedded NULs and invalid enums are rejected. Version is 1. Sequence is uint32,
 1 through 4294967295, strictly increasing per connection. Reconnect before
 rollover. Distance is integer 1–150 or null. Age is uint32 milliseconds or null.
 Status is `live`, `stale`, `invalid` or `unavailable`; source is `rover` or `demo`.
+
+The sender maps `bench.auto.expression` to the optional expression field. After
+confirmed ore arrival, the backend can send `"happy"`; the display temporarily
+shows its full-screen animated happy face even if it was on Distance or Link.
+The ordinary automatic mood cycle and previous page return on `"auto"`/omission,
+disconnect, or three seconds without a valid new packet. Repeated happy packets
+do not restart the animation. Touch navigation is paused during the celebration.
+A stale/invalid ultrasonic reading does not cancel an otherwise fresh expression.
+If HTTP acquisition stops updating for three seconds, the sender itself drops
+the happy request; the expression cannot stay latched by repeated old telemetry.
+
+**Firmware update required for this new animation command:** updated firmware
+accepts both the original seven-field packets and the eight-field extension.
+An older flashed build rejects the extra field. Normal auto packets still use
+the original shape; that preserves ordinary telemetry with older firmware.
+Upload the updated standalone sketch once to enable arrival animation. No firmware
+was flashed or physical animation test performed as part of this code change.
 Live requires distance and age; invalid/unavailable require null distance.
 `rover_connected` is a JSON boolean. Demo never claims a real rover connection.
 

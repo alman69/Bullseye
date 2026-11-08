@@ -134,6 +134,8 @@ def create_app(settings: Settings | None = None, *, bench_bridge=None):
                             raise CommandError("Vision is not running on this server.")
                         if controller.pilot != session_id:
                             raise CommandError("Claim pilot controls first.")
+                        if bench and bench.operation is not None:
+                            raise CommandError("Stop rover motion before changing vision or calibration.")
                         await vision.command(command.type, command.payload)
                         controller.publish()
                     else:
@@ -164,6 +166,16 @@ def create_app(settings: Settings | None = None, *, bench_bridge=None):
         if vision is None:
             raise HTTPException(404, "Vision is disabled (BULLSEYE_VISION=0).")
         return vision.summary()
+
+    @app.get("/api/vision/calibration-frame")
+    async def vision_calibration_frame(response: Response):
+        response.headers["Cache-Control"] = "no-store"
+        if vision is None or not vision.available:
+            raise HTTPException(503, "Vision is not available.")
+        try:
+            return await asyncio.to_thread(vision.calibration_frame)
+        except CommandError as error:
+            raise HTTPException(409, str(error)) from error
 
     @app.get("/api/vision/mask.jpg")
     async def vision_mask(kind: str = "target"):

@@ -5,6 +5,8 @@ Missing keys fall back to DEFAULTS, so a partially edited file still works.
 from __future__ import annotations
 
 import copy
+import fcntl
+import hashlib
 import json
 import os
 import tempfile
@@ -55,7 +57,7 @@ DEFAULTS: dict = {
         "slow_forward_ms": 150,
         "slow_area_ratio": 0.04,
         "arrive_area_ratio": 0.08,
-        "arrive_distance_cm": 20,
+        "arrive_distance_cm": 10,
         "emergency_distance_cm": 10,
         "distance_check_every": 3,
         "lost_decisions": 3,
@@ -67,12 +69,23 @@ DEFAULTS: dict = {
         "backoff_ms": 300,
         "explore_steps": 3,
         "explore_timeout_s": 120,
+        "explore_forward_ms": 1000,
+        "base_distance_cm": 15,
+        "far_forward_ms": 1000,
+        "far_bottom_y": 0.55,
+        "mid_forward_ms": 500,
+        "mid_bottom_y": 0.7,
+        "clear_floor_height": 0.6,
+        "glimpse_hfov_deg": 50,
+        "camera_latency_s": 0.15,
+        "wall_distance_cm": 25,
         "decision_period_s": 0.5,
         "arrival_mode": "camera",
         "approach_zone_y": 0.08,
         "camera_hfov_deg": 0,
         "steps": {"forward": {}, "turn": {}},
     },
+    "obstacles": {"colors": ["blue"]},
     "ground": {
         "points": [],
         "width_k": None,
@@ -80,9 +93,10 @@ DEFAULTS: dict = {
         "stop_line_y": None,
         "size_tolerance": 2.0,
     },
-    "rover_mask": {"boxes": []},
+    "rover_mask": {"boxes": [], "polygons": []},
+    "palette": {"profiles": {}},
     "classifier": {
-        "mode": "auto",
+        "mode": "palette",
         "model_path": "color_model.json",
         "samples_path": "captures/samples.npz",
         "max_distance": 4.0,
@@ -115,26 +129,67 @@ def _merge(base: dict, override: dict) -> dict:
     return out
 
 
+class ConfigConflictError(ValueError):
+    """Another process or checkout changed the calibration after this copy was loaded."""
+
+
+class Config(dict):
+    """Ordinary JSON-compatible dict with an out-of-band disk revision for safe saves."""
+
+    def __init__(self, values, source_path, source_digest):
+        super().__init__(values)
+        self.source_path = source_path
+        self.source_digest = source_digest
+
+
+def _digest(raw):
+    return None if raw is None else hashlib.sha256(raw).hexdigest()
+
+
+def _read_bytes(path):
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
 def load_config(path: str | os.PathLike | None = None) -> dict:
-    """Return DEFAULTS overlaid with the JSON file (if it exists)."""
-    path = Path(path) if path else DEFAULT_CONFIG_PATH
-    if not path.exists():
-        return copy.deepcopy(DEFAULTS)
-    with open(path, "r", encoding="utf-8") as f:
-        return _merge(DEFAULTS, json.load(f))
+    """Load defaults plus saved values, remembering the exact revision that was read."""
+    path = (Path(path) if path else DEFAULT_CONFIG_PATH).resolve()
+    raw = _read_bytes(path)
+    values = copy.deepcopy(DEFAULTS) if raw is None else _merge(DEFAULTS, json.loads(raw))
+    return Config(values, path, _digest(raw))
 
 
 def save_config(cfg: dict, path: str | os.PathLike | None = None) -> Path:
-    """Write the config atomically (temp file + rename) so a crash cannot truncate it."""
+    """Atomically save; reject stale loaded copies rather than losing newer calibration.
+
+    A separate advisory lock serializes cooperating writers across processes. The
+    revision is metadata on Config, never a key in the saved JSON. Plain dicts may
+    still be used to initialize/export configurations without a revision check.
+    """
     path = Path(path) if path else DEFAULT_CONFIG_PATH
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".config-", suffix=".json")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=2)
-            f.write("\n")
-        os.replace(tmp, path)
-    except BaseException:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-        raise
+    resolved = path.resolve()
+    payload = (json.dumps(cfg, indent=2) + "\n").encode("utf-8")
+    lock_path = resolved.with_name("." + resolved.name + ".lock")
+    with lock_path.open("a+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if isinstance(cfg, Config) and cfg.source_path == resolved:
+            if _digest(_read_bytes(resolved)) != cfg.source_digest:
+                raise ConfigConflictError(
+                    "Calibration changed on disk in another server or checkout. "
+                    "Restart this server to load the saved calibration, then retry; nothing was overwritten.")
+        fd, tmp = tempfile.mkstemp(dir=str(resolved.parent), prefix=".config-", suffix=".json")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, resolved)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+        if isinstance(cfg, Config):
+            cfg.source_path, cfg.source_digest = resolved, _digest(payload)
     return path

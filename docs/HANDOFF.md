@@ -1,15 +1,43 @@
 # Bullseye team handoff (for teammates and their AI assistants)
 
-Snapshot updated **2026-11-08, about 05:00 EST** (`main` = PR #10 merged, plus this handoff). It covers
-everything up to PR #10. Things change fast during the hackathon: **check `git log`, open PRs and
-`git branch -r --no-merged origin/main` before trusting any status below.**
+## Current integration — 2026-11-08
+
+The local integration combines the preserved vision/calibration work (`c6f3a91`) with
+`origin/AlexTrainingAutonomousBranch` (`5625198`). The integration branch is
+`codex/integrate-autonomy`; the operator requested a local result and a ready PR description,
+with no GitHub publishing. Check the actual branch/log for completion status.
+
+- Keep the local **palette** workflow: red, green, blue, yellow, brown cardboard, black home,
+  and floor; click/box samples; frozen snapshots; traced rover polygons. Alex's older HSV
+  calibration UI is not the primary workflow.
+- Accepted examples and masks are saved immediately in `software/vision/config.json`. Restarting
+  the server or rover does not erase them. A stale second server cannot silently overwrite newer
+  calibration. The saved camera preset is reapplied when the real stream reconnects.
+- **Servo squeezing is retired.** Reaching ore signals a sample; there is no physical grasping
+  or required pickup/deposit step. The UI has no squeeze control; old scooper commands are rejected. Firmware experiments are retained as history and have not
+  been flashed as part of this integration. Use the display-only guide for telemetry.
+- **Red and green are ore targets; blue is an obstacle.** Yellow remains a calibration class.
+  A mission stops at the ore, turns the rover LEDs green, and shows a happy/excited display response.
+  It then automatically searches for the actual home flag and returns from the current heading.
+  The LEDs are red while searching for ore, green after reaching it and during return, and reset
+  to red at home. No blind 180° turn or manual pickup confirmation is required.
+- Home means near-black, not arbitrary dark gray: brightness ≤40/255 and RGB channel spread
+  ≤12/255. Color alone cannot distinguish a truly black shadow from the flag.
+- Autonomy remains experimental timed approach/search. Obstacle avoidance stays on; search is
+  bounded; home approach requires sonar; arrival requires fresh centered observations and
+  acknowledged STOP. Physical stopping accuracy and arena exploration remain unverified.
+
+Read [Simple vision](SIMPLE_VISION.md), the [exploration plan](AUTONOMY_PLAN.md), and the
+[PR description](INTEGRATION_PR.md) for the current workflow. Older branch/test/calibration
+reports below are historical unless updated explicitly. **Restart the server after pulling.**
 
 ## Ready-to-paste prompt for your AI assistant
 
 > You are helping build **Bullseye**, an autonomous "Mars rover" for UB Hackathon 2026
 > (24-hour event, team of three) on the ELEGOO Smart Robot Car V4.0. Repository:
 > `git@github.com:alman69/Bullseye.git`. Before writing code, read `docs/HANDOFF.md`
-> (this file), then `docs/MISSION_CONTROL.md` (especially "Vision (built in)"),
+> (this file), then `docs/SIMPLE_VISION.md`, `docs/AUTONOMY_PLAN.md`,
+> `docs/MISSION_CONTROL.md` (especially "Vision (built in)"),
 > `docs/ELEGOO_CONNECTION.md` and `software/vision/README.md`. Then inspect the code you will
 > touch.
 >
@@ -23,7 +51,7 @@ everything up to PR #10. Things change fast during the hackathon: **check `git l
 >   server.
 > - Never claim a physical rover or camera test passed unless a human ran it and reported the
 >   result.
-> - Propose a plan and wait for approval before large changes.
+> - Preserve operator calibration, and keep new motion changes bounded and testable.
 > - The repo is **public**: never commit secrets, `.env`, or camera snapshots
 >   (`software/vision/captures/` is gitignored).
 > - Work on a branch and open a PR. The team co-owns all code; merging after tests pass is fine.
@@ -34,27 +62,27 @@ everything up to PR #10. Things change fast during the hackathon: **check `git l
 ## 1. Mission and the current arena
 
 **Mission:**
-1. A user picks a target color in Mission Control.
-2. The rover searches with its camera, drives to the mineral while avoiding obstacles, and stops.
-3. Mission Control confirms the sample.
-4. The RGB LEDs show the color.
-5. The rover returns home (manual help allowed).
+1. A user chooses red or green ore in Mission Control.
+2. With red LEDs, the rover searches, avoids obstacles, approaches the ore, and stops.
+3. Reaching the ore marks the demo sample: LEDs turn green and the display celebrates.
+4. The rover automatically searches for the black home flag and returns with green LEDs.
+5. It stops at home and resets the LEDs to red. No servo or manual pickup/deposit step is involved.
 
 **Arena (as of 2026-11-08):**
 - **Floor and walls:** matte white floor; unpainted cardboard walls.
-- **Minerals:** crumpled **paper balls** in red, green and blue. They sit **below the ultrasonic
-  beam**.
-- **Obstacles:** a **yellow (lime) sheet**.
+- **Ore targets:** **red and green** objects; small paper balls can sit below the ultrasonic beam.
+- **Obstacles:** **blue**. Yellow remains a supported calibration material, not an ore selection.
 - **Lighting:** the **floodlight is always on**.
 - **Gripper:** the rover now has a **popsicle-stick gripper** in front, and its two claws (blue/black
-  tape) are always in the bottom of the camera view. **All distances are measured from the
-  stick tips** (the zero point).
+  tape) are always in the bottom of the camera view. **Ground/stop-line calibration distances use the
+  stick tips** as zero. Raw sonar readings use the sensor origin; measure its mounting offset
+  before treating them as an ore-arrival gap.
 
 **Hardware:**
 - Arduino UNO R3, ESP32-WROVER camera (Wi-Fi access point), TB6612, MPU6050, ultrasonic sensor and
   camera on one pan servo, RGB LEDs.
 - A separate **ESP32-S3 touchscreen** shows telemetry over BLE (`docs/BLE_DISPLAY.md`).
-- Luke's unmerged branch drives two **SG90 servos** for the gripper from that same S3 board (§3).
+- Two **SG90 servo** experiments are archived (§3); servo squeezing is retired in the active setup.
 
 ## 2. Who started what (everyone may change anything)
 
@@ -64,7 +92,59 @@ everything up to PR #10. Things change fast during the hackathon: **check `git l
 | Mission Control (dashboard, server, `/bench` manual driving, rover bridge), BLE display | faiyaz | `mission-control/`, `firmware/esp32-display/`, `docs/MISSION_CONTROL.md`, `docs/ELEGOO_CONNECTION.md`, `docs/BLE_DISPLAY.md` |
 | Gripper "scooper" (SG90 squeeze) | Luke Coppola | branch `feature/scooper` (not merged, §3) |
 
-## 3. Repository status
+## 3. Historical repository and servo experiment notes
+
+**Archive:** the following records explain earlier decisions and tests. They do not override the
+current integration above; do not use the old Scooper Connect/Squeeze workflow.
+
+**Combined integration prepared on `codex/display-scooper`:** the latest Wi-Fi
+scooper branch is the base. `firmware/esp32-companion/bullseye_companion/`
+contains one generated `.ino` for the same S3's animated display, BLE telemetry
+and GPIO39/40 scooper **over one BLE connection owned by Mission Control**.
+The combined sketch no longer joins Wi-Fi; the Mac's rover Wi-Fi is unchanged.
+Stop `send-display.sh`, restart the backend, then Claim controls → Scooper Connect
+to connect both functions. The existing `/bench` Scooper panel is retained.
+The backend/device use ordered commands so delayed motion cannot overtake STOP;
+the device also stops active motion on BLE/control-heartbeat loss. See the
+[upload/operator guide](../firmware/esp32-companion/README.md). Compile and
+offline tests pass; combined hardware upload/testing remain operator work.
+The combined PWM adapter now checks LEDC attach/write results, avoiding the old
+immediate-frequency-readback startup race. Actual PWM faults disable both servo
+outputs while BLE/display telemetry stay connected; the UI and backend disable
+motion separately. Native delayed-readback and failed-output tests cover this.
+BLE heartbeat/action writes are now serialized per characteristic, including
+bounded draining of canceled in-flight writes, fixing a CoreBluetooth write
+future collision. Watchdog history and idle-disconnect reporting are corrected;
+the two-second stop timeout is unchanged. The UI shows heartbeat diagnostics and
+labels its diagram as commanded positions. See [physical scooper tests](SCOOPER_TEST.md).
+Latest operator follow-up: both local `set 1` (left) and `set 2` (right) now
+physically work at 80°, 90° and 110°. An earlier right-output problem resolved
+after troubleshooting, but the operator is unsure which adjustment fixed it;
+do not claim a confirmed root cause. Both small-range local command paths have
+passed. The operator subsequently reported both servos passing the full
+individual range tests with unchanged boot IDs. Simultaneous BLE-controlled
+Squeeze still disconnects; it is not physically verified as a complete mission
+action. Servo supply is from the S3/USB 5V pin via a breadboard split, sharing
+the battery with the display/S3. The operator then confirmed **BLE stays
+connected through Squeeze with both servos completely disconnected**. That
+isolates the failure to conditions involving the attached servos rather than
+the unloaded command sequence; power delivery/noise/wiring under load are
+leading suspects, not measured/proven electrical diagnoses. Source voltage,
+current rating and available separate servo supply are being clarified before
+a power-path isolation test. Do not join separate positive supplies or backfeed
+a USB-powered S3 header.
+Latest signal-isolation follow-up: the operator reports that either attached
+servo causes display flickering even without BLE, and disconnecting just the
+signal wires clears it. Reported boot IDs remain unchanged in serial checks;
+a full S3 reboot is therefore not established. Power remains shared through a
+breadboard, with supply voltage/current rating unknown. The operator moved
+signals to GPIO39/40; the shared configuration and generated companion sketch
+now assign **left=39, right=40**. Upload and physical verification are pending;
+this pin change is a diagnostic test, not a confirmed fix. Avoid GPIO35–37
+(octal memory) and GPIO47/48 (1.8 V logic on the N32R16V module).
+The vision baseline work was saved separately on `codex/vision-baseline`,
+commit `70c528c`, before switching to this integration. Vendor firmware and
+the original standalone display/scooper sketches remain preserved.
 
 **`main`** has all of PRs #1–#10:
 
@@ -125,7 +205,7 @@ UNO's replies back (`firmware/arduino-uno/.../ApplicationFunctionSet_xxx0.cpp` a
 | `{"N":100}` | STOP (replies `{ok}`) | **Also turns the RGB LEDs off**. Mind this after the "collected" LED is set |
 | `{"N":21,"D1":2,"H":id}` | Ultrasonic distance → `{id_<cm>}` | Blocks inside the UNO while it measures. `0` means no echo (NOT clear space); `150` is the clamp (150+ cm). Reads short and is uncalibrated |
 | `{"N":22,"D1":0,"H":id}` | Cached IR value | faiyaz uses it as a fast acknowledgement after each N2 |
-| `{"N":8,"D1":0,"D2":r,"D3":g,"D4":b}` | Set all RGB LEDs (N7 = timed) | Not yet in the Mission Control bridge |
+| `{"N":8,"D1":0,"D2":r,"D3":g,"D4":b}` | Set all RGB LEDs (N7 = timed) | The bridge sends this only with a preceding acknowledged STOP |
 | `{"N":5,"D1":1,"D2":angle}` | Pan servo | The firmware divides the angle by 10 and clamps it, so it moves in 10° steps, about 10–170° |
 
 - **Heartbeat:** the ESP32 sends `{Heartbeat}` every second. Echo it back, or after about 4 s the
@@ -156,82 +236,69 @@ servo and LED commands only while stopped.
 ESP32 camera ──MJPEG──► Mission Control server (FastAPI, Python 3.13)
                           ├─ camera.CameraHub ── the ONLY camera client ──► /ws/video (browser)
                           ├─ vision.VisionService (worker thread, newest frame):
-                          │    camera preset → white balance → color classifier + color gate
+                          │    camera preset → palette profiles
                           │    → rover mask → detection → floor check → planner DRY RUN
                           │    ──► /ws/vision (overlay) + state.vision (panels)
                           ├─ bench_demo.FactoryBridge ── the ONLY port-100 client (/bench manual driving)
+                          ├─ autopilot.Autopilot ── explicit /bench timed approach + return
                           └─ mission.MissionControl (state machine, Simulator / HardwareStub adapters)
 Browser dashboard (/ and /bench): video + vision overlay, Vision panel, Calibration panel
 Separate: BLE sender reads the cached /api/bench/state → ESP32-S3 display
 ```
 
-**Demo autopilot (PR #12, on `/bench`)**, the "dumb autonomous" plan for the demo:
-1. Pick a mineral color and press **Go to <color>**. The rover aims and steps toward it, then stops
-   at it (stop line, or by size if the stop line isn't calibrated).
-2. Pick the mineral up **by hand**.
-3. Press **Return to base**: it turns ~180° (from the measured step table: 3×1.0 s + 0.5 s + 0.2 s,
-   to the left), then drives to the **black flag** (black = dark pixels; adjust "Black flag: max
-   brightness" in Tuning).
-4. Drop the mineral by hand.
+**Current `/bench` autopilot:**
+1. Claim controls, connect the bridge, and enable controls. Select red or green ore.
+2. Start the ore mission. The rover searches with red LEDs, aims, approaches, and stops at arrival.
+3. The stopped arrival marks the sample: rover LEDs turn green and the display shows a happy/excited
+   response. This is the demo's sample event, not a claim that the object was physically grasped.
+4. The rover automatically searches for the black flag and returns, keeping green LEDs during the
+   return. It stops near the home wall and resets the LEDs to red.
 
-How it works:
-- **One step at a time:** every move is one N2 timed step through `FactoryBridge.pulse` (STOP
-  before and after). After each step it waits for a fresh frame, then asks the planner for the next
-  step.
-- **"Avoid obstacles: on/off":** uses the camera floor check (off = drive straight at the target).
-- **STOP** cancels it immediately. If the target is lost after a full search turn, it stops and
-  says so.
-- **Needs** the bridge connected and controls enabled.
-- **Code:** `bullseye/autopilot.py`, `/bench` commands `auto_goto` and `auto_return`, and
-  `components/autopilot-panel.tsx`.
+Blue is an obstacle, never an ore destination. Yellow remains calibratable but is not a mission
+selection. The standalone Return to base control is also available; no manual pickup is required.
 
-## 6. Vision details (`software/vision/bullseye_vision` + `mission-control/server/bullseye/vision.py`)
+Each move uses a bounded N2 pulse with STOP before and after, followed by fresh camera frames.
+Obstacle avoidance is always enabled. The search timeout defaults to 120 seconds and is bounded
+between 30 and 300 seconds. Arrival requires three fresh centered observations with STOP
+acknowledgements. A remaining gap smaller than a safe timed step reports stopped-short rather
+than falsely declaring arrival. STOP, lost pilot ownership, or connection loss cancels motion.
+Vision settings cannot be changed during an active bench operation.
 
-All calibration lives in **`software/vision/config.json`** and **`color_model.json`**, shared by
-the standalone app and Mission Control. The dashboard writes them.
+The home flag's visual size does not prove arrival: home approach needs valid sonar. Small minerals
+may sit below the sonar beam, so camera arrival is an estimate that still needs measured arena
+acceptance. This code has no map, reliable global position, coverage guarantee, or automatic gripper.
+See [AUTONOMY_PLAN.md](AUTONOMY_PLAN.md) for the next implementation stages.
 
-- **Camera preset** (`camera.controls`): **saturation +2, exposure (`ae_level`) −2,
-  brightness −2, contrast 0**.
-  - Sent to the ESP32's `/control` when video starts and again after any gap of 3 s or more (camera
-    restart).
-  - These are RAM-only settings, not firmware, and the camera's own web page can't save them.
-  - **Any camera change means resampling the colors.**
-- **Rover mask** (`rover_mask.boxes`, 9 boxes over the claws): ignored for every color, and
-  treated as floor by the floor check.
-- **Color classifier** (`colorclass.py`):
-  - **Classes:** red, green, blue and yellow minerals, plus floor and cardboard (an "obstacle"
-    class exists but isn't sampled).
-  - **Fitting:** one Lab Gaussian per class, learned from drag-box samples, plus white balance
-    referenced to the floor color.
-  - **Color gate (PR #10):** a pixel only counts as a mineral if its color points far enough in that
-    mineral's direction (above the most-tinted floor or cardboard sample, ≥ `min_chroma` 12, and
-    cutting ≤ 20% of the mineral's samples).
-    - **Why:** under the floodlight the floor is tinted (Lab chroma 18–28; warm far away, bluish
-      near the claws), which caused false red, blue and green.
-    - **Result on real data:** zero false detections on an empty frame, while the balls keep
-      85–100% of their pixels.
-- **Fit only takes effect when "Fit color model" is clicked;** the Colors tab warns if that hasn't
-  happened. "Clear all samples" exists for resampling after a camera change.
-- **Floor check** (`freespace.py`): in 5 strips, how far up the floor reaches; it uses the
-  classifier's floor class when there is one, otherwise HSV (`floor.s_max` 45).
-- **Ground / stop line** (`ground.py`): block captures at known distances give a mapping from bottom
-  edge to distance and the stop line. **Not calibrated yet.**
-- **Planner** (`planner.py`, dry run):
-  - **States:** SEARCH / APPROACH / AVOID / EXPLORE / ARRIVED / GIVE_UP.
-  - **Steps:** each step is one N2 timed move, sized from the step table and the field of view.
-  - **Arrival** is camera-based: the block's bottom edge reaches the stop line, or it slips out of
-    the bottom of the view while centered at the line. The ultrasonic sensor is only a wall
-    backstop, ignored near the target.
-  - **Turns:** search and avoid turns are 1000 ms (≈49°).
-- **Tests:** vision 94, server 129, web 48 pass on `main`. Tests use built-in defaults
-  (`tests/support.py`), never the arena calibration files.
+## 6. Current vision and persistence
+
+The primary detector is `classifier.mode: "palette"`. Each material has up to eight small profiles;
+new accepted examples add variations rather than continually widening one range. The first example
+replaces that material's built-in profile. Floor and cardboard examples compete with objects, and
+ambiguous pixels can remain unknown. Home has an additional fixed near-black gate. See
+[SIMPLE_VISION.md](SIMPLE_VISION.md) for exact rules and the calibration workflow.
+
+The authoritative operator file is **`software/vision/config.json`**, or `config.json` inside
+`BULLSEYE_VISION_DIR` when configured. It stores `palette.profiles`, rover polygons and older mask
+boxes, camera controls, and measured navigation steps. Each successful calibration command saves
+immediately through an atomic replacement. Revision checks prevent a stale second process from
+clobbering newer data. `color_model.json` and sample archives are retained for legacy comparisons;
+there is no Fit step in palette mode.
+
+The camera's own settings are RAM-only. Mission Control sends the saved preset when streaming starts
+and after a gap of at least three seconds. Confirm that application succeeds after a rover restart.
+Revisit colors if lighting or camera settings change; revisit the mask if framing or rover geometry
+changes. Reboots alone do not require resampling.
+
+Calibration uses exact frozen PNG pixels and a server snapshot ID. Click a material chip, click or
+box a solid part, then return to live video. For the rover mask, trace each visible claw separately
+and keep the opening clear. Masks exclude every material, including home and blue tape.
 
 ## 7. How to run (Alex's Mac is fully set up; others follow `docs/MISSION_CONTROL.md`)
 
 - **Real rover** (camera, `/bench` driving, vision):
   - Join `ELEGOO-2436CBF61B44`, then run:
     ```
-    ~/Projects/Bullseye/mission-control/run-rover-demo.sh
+    ./mission-control/run-rover-demo.sh
     ```
   - Open http://localhost:8001/bench, then **Claim controls** → **Calibrate**.
 - **Simulation** (no hardware; vision runs on simulated rocks): `./mission-control/run.sh`, then
@@ -246,47 +313,28 @@ the standalone app and Mission Control. The dashboard writes them.
 - **Only one Mac at a time** may run the controller: camera, rover bridge and display each accept
   one client.
 
-## 8. Calibration status and next steps
+## 8. Current acceptance work
 
-**Done:**
-- the step table
-- the camera preset
-- the gripper mask
-- color samples, with a model fitted **before** the gate
+The existing operator camera preset, color examples, and mask geometry are preserved. Do not reset
+or replace them just because the server or rover restarted.
 
-**Next, in order** (dashboard Calibration panel, about 20 minutes):
-1. **Restart the server** so it runs PR #10, then **3 Colors → Fit color model**. No resampling
-   needed; this adds the gates.
-2. **Empty-arena check:** with no balls in view, the red, green, blue and yellow chips must each say
-   **NOT IN VIEW**. If one doesn't, turn on "Mask: target" to see where, add 2 floor or cardboard
-   boxes there, and fit again.
-3. **Ball check:** each ball at **30 cm and 1 m** must show **DETECTED**. If far balls are missed,
-   set Tuning → Min block size to about 80.
-4. **Stop line:**
-   - Red ball **centered**, measured from the **stick tips**: capture at 3, 10, 20 and 30 cm, then
-     Fit.
-   - Tuning: set Stop distance to about **3 cm** and Min block size to about **80**.
-5. **Field of view:** ball at 30 cm, centered, then 10 cm to the side → Compute.
-6. **Dry run** (push the rover by hand, target red):
-   - **B:** ball 1 m ahead → FORWARD "About X cm to go"
-   - **C:** ball at the edge → TURN toward it
-   - **D:** ball at the stop line → ARRIVED
-   - **E:** obstacle in between → AVOID
-7. **Commit** `color_model.json` and `config.json` once checks 2–6 pass.
+1. Check the camera preset status and confirm the saved material sample counts and rover mask.
+2. Check an empty arena for false colored objects; add floor/cardboard examples only where needed.
+3. Check all four object colors at near and far distances, and the actual black flag against nearby
+   shadows. Confirm no rover pixels are being detected.
+4. Verify measured movement steps and a stop line against the physical stick-tip zero point. Keep
+   sonar distance and camera/ground distance distinct until their mounting offset is measured.
+5. Validate STOP and interrupted-run behavior with wheels raised, then short approaches in a clear
+   arena. Measure the final physical gap; do not infer it from an ARRIVED label.
+6. Verify stopped ore arrival triggers green LEDs and the happy display, followed by automatic home
+   reacquisition from several headings. Keep green during return and reset red at home. Missing or
+   invalid sonar must prevent a home forward approach.
+7. Follow the staged [exploration plan](AUTONOMY_PLAN.md) before extending this into full missions.
 
-**Testing the demo autopilot (§5):** wheels raised first. Check that Go to <color> aims the right way
-and Return to base turns ~180°. Then run it on the floor with a clear path, and turn on "Avoid
-obstacles" only once the plain run works.
+The automated results for this integration belong in [INTEGRATION_PR.md](INTEGRATION_PR.md).
+They do not certify physical stopping, obstacle avoidance, or exploration coverage.
 
-**Then, the big remaining work:**
-- **A real `RoverAdapter`** (autonomous driving): execute the planner's moves through
-  `FactoryBridge` as N2 timed steps (servo and LED only while stopped). Add the ultrasonic wall
-  backstop. On ARRIVED: stop, request confirmation, then pick up with the scooper.
-- **Set the LED after confirmation.** N100 STOP clears the LEDs, so re-send N8 after stops, or
-  stop another way.
-- **Decide the ESP32-S3 board** (display vs. scooper), then merge `feature/scooper`.
-
-## 9. Lessons from 2026-11-08 (save yourself the time)
+## 9. Earlier classifier lessons and continuing camera gotchas
 
 - **Nothing detected under the floodlight?** Three causes, all fixed:
   - colors were washed out (the red ball measured saturation 43–83), fixed by the camera preset
@@ -299,8 +347,8 @@ obstacles" only once the plain run works.
   except matched pixels.
 - **A good overlap table isn't proof.** It only compares your samples with each other. Always do
   the empty-arena check (step 2 above).
-- **The ultrasonic sensor can't see the paper balls** (they're below the beam), so arrival is
-  camera-only, using the stop line.
+- **Paper balls can be below the ultrasonic beam.** Camera arrival then remains an estimate.
+  The current approach also uses near sonar readings when available; home arrival requires sonar.
 
 ## 10. Practical gotchas
 
