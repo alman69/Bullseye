@@ -110,3 +110,18 @@ class FreeSpaceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoverPartsTests(unittest.TestCase):
+    def test_small_blue_blobs_touching_the_rover_mask_are_not_obstacles(self):
+        from bullseye_vision.pipeline import NavRunner
+        rover = np.zeros((H, W), np.uint8)
+        rover[500:600, 150:300] = 255                                  # a claw's mask box
+        blue = np.zeros((H, W), np.uint8)
+        blue[510:540, 300:320] = 255                                   # tape poking out of the box
+        blue[100:200, 500:600] = 255                                   # a real obstacle far away
+        blue[480:600, 350:500] = 255                                   # a big obstacle right next to the claw
+        out = NavRunner._without_rover_parts(blue, rover)
+        self.assertEqual(out[520, 310], 0)
+        self.assertEqual(out[150, 550], 255)
+        self.assertEqual(out[550, 400], 255)

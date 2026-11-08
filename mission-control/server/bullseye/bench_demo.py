@@ -474,7 +474,7 @@ class BenchControl:
                             job = lambda pilot: pilot.mission(color, avoid=avoid)
                         else:
                             label = f"Autopilot: go to {color}"
-                            job = lambda pilot: pilot.go_to("home", avoid=avoid) if color == "home" else pilot.collect(color, avoid=avoid)
+                            job = lambda pilot: pilot.go_to("black", avoid=avoid) if color == "home" else pilot.collect(color, avoid=avoid)
                         label += " (avoiding obstacles)" if avoid else ""
                     else:
                         label = "Autopilot: search for the home flag and stop at base" + (" (avoiding obstacles)" if avoid else "")
@@ -482,12 +482,28 @@ class BenchControl:
                     self.direction, self.drive_mode = "auto", "auto"
                     self.log(label + ".")
                     self.launch(lambda: self._autopilot(job), "Autopilot finished. STOP acknowledged in software.")
+                elif kind in {"sample_collected", "sample_deposited"}:
+                    # Manual-grab flow: the pilot drove up, grabbed the sample, and (later) drove it home.
+                    if not self.armed or not self.bridge.connected or self.stopped:
+                        raise CommandError("Connect and enable controls first.")
+                    if self.operation or self.stop_pending:
+                        raise CommandError("A step or STOP is in progress. Commands are not queued.")
+                    if payload.get("arm_token") != self.arm_token:
+                        raise CommandError("This request is outdated. Use the current controls.")
+                    collected = kind == "sample_collected"
+                    rgb = (0, 255, 0) if collected else (255, 0, 0)
+                    state, message = (("collected", "Sample collected. LEDs green. Drive it back to base.") if collected
+                                      else ("deposited", "Sample deposited at home base. LEDs red."))
+                    self.log(message, "success")
+                    self._report(state, message)
+                    self.launch(lambda: self.bridge.set_led(rgb), f"LEDs {'green' if collected else 'red'}.")
                 else:
                     raise CommandError("Unknown rover command.")
             self.publish()
 
     def _report(self, state, message):
-        self.auto = {"state": state, "message": message, "expression": "happy" if state == "sample_reached" else "auto"}
+        self.auto = {"state": state, "message": message,
+                     "expression": "happy" if state in ("sample_reached", "collected") else "auto"}
         self.publish()
 
     async def _autopilot(self, job):

@@ -1,14 +1,39 @@
-"""Timed sample mission: approach, signal success, then return to the home flag.
+"""Demo autopilot: drive to a colored mineral, turn around, drive to the black flag.
 
-Experimental: color/sonar heuristics require arena acceptance tests; no servo collection.
+Deliberately simple for the hackathon demo:
+  * The minerals are in front of the rover and the black home-base flag is behind them
+    (it comes into view after a 180-degree turn). Pickup and drop are done by hand.
+  * Every move is ONE vendor N2 timed step through FactoryBridge.pulse(), which sends a STOP
+    before and after the step, so the rover never keeps driving if the laptop goes away.
+  * After each step it waits for a camera frame taken after the move ended, then asks the
+    vision planner (the same one the dashboard shows as DRY RUN) for the next step.
+  * Obstacle avoidance is optional: with avoid=True the planner's camera floor check can
+    steer around things that aren't floor or the target (yellow is always an obstacle); with
+    avoid=False it drives at the target.
+  * It never gives up: when a full spin doesn't find the target (e.g. it's hidden behind an
+    obstacle), it drives toward open floor and spins again, until it finds it or STOP is pressed.
+    Before each exploring/avoiding forward step it reads the ultrasonic sensor; a wall closer
+    than `wall_distance_cm` turns it toward open floor instead.
+  * Brief sightings count: vision remembers the newest frame where the target was detected,
+    including frames taken while the rover was moving. If the target flashed into view during a
+    move but isn't in the decision frame, it turns back to where it was seen (estimated from the
+    step table and when, during the turn, the frame was taken) and looks again twice.
+  * Arrival: the target is centered and the ultrasonic reads the stop distance (10 cm for a
+    mineral, 15 cm from the wall for the black home flag); forward steps are shortened so they
+    never overshoot it. For minerals the camera "looks big enough" check only counts when the
+    ultrasonic can't see the object (no echo or far reading: a ball below the beam). The flag is on a wall, so for black the
+    floor check only counts obstacle colors (the wall itself is the destination).
+  * LEDs: red while working, green once a sample is collected, red again after it's deposited.
+  * STOP on /bench cancels the task immediately; the step in progress still ends with a STOP.
+    It only stops on its own for a fault: no fresh camera frames.
 """
 import asyncio
 import time
 
 RED, GREEN = (255, 0, 0), (0, 255, 0)
+GLIMPSE_COOLDOWN = 3      # after chasing a glimpse that didn't pan out, ignore glimpses for this many moves
 MOVE_TO_DIRECTION = {"turn_left": "left", "turn_right": "right", "forward": "forward", "backward": "backward"}
 TURN_DIRECTION = "left"
-SONAR_CLEARANCE_CM = 1.0  # integer sonar reports: stop one centimetre early
 
 
 class AutopilotError(RuntimeError):
@@ -24,21 +49,20 @@ class Autopilot:
         pipeline = self.vision.v.pipeline
         cfg = self.vision.cfg
         settings = pipeline.NavSettings.from_dict(cfg["navigation"])
-        settings.explore_timeout_s = max(30, min(300, settings.explore_timeout_s or 120))
+        settings.explore_timeout_s = 0          # never give up: keep exploring until found or STOP
         stop_line = cfg["ground"].get("stop_line_y")
-        if color == "home":                    # the flag is big and on a wall: arrive by ultrasonic only
+        if color == "black":                    # the flag is big and on a wall: arrive by ultrasonic only
             settings.arrive_area_ratio, stop_line = 2.0, None
         return pipeline.Planner(settings, use_distance=False, stop_line_y=stop_line)
 
     def _stop_cm(self, color: str, planner) -> float:
         nav = self.vision.cfg["navigation"]
-        return float(nav.get("base_distance_cm", 15)) if color == "home" else float(planner.s.arrive_distance_cm)
+        return float(nav.get("base_distance_cm", 15)) if color == "black" else float(planner.s.arrive_distance_cm)
 
     async def _led(self, rgb) -> None:
         setter = getattr(self.bridge, "set_led", None)
         if setter is not None:
-            if await setter(rgb) is not True:
-                raise AutopilotError("LED/STOP command was not acknowledged. Motion halted.")
+            await setter(rgb)
 
     def _seq(self) -> int:
         latest = self.vision.latest
@@ -87,7 +111,8 @@ class Autopilot:
     def _glimpse(self, color: str, after_seq: int, move, planner):
         """Bearing (degrees, + = right of the current heading) of a sighting newer than `after_seq`."""
         seen = self.vision.last_seen
-        if not seen or seen["target"] != color or seen["seq"] <= after_seq:
+        target = "home" if color == "black" else color          # palette vision names the black flag "home"
+        if not seen or seen["target"] not in (color, target) or seen["seq"] <= after_seq:
             return None
         nav = self.vision.cfg["navigation"]
         hfov = planner.s.camera_hfov_deg or nav.get("glimpse_hfov_deg", 50)
@@ -104,32 +129,16 @@ class Autopilot:
         """Before a forward step toward the centered target: arrive at the stop distance, never overshoot it."""
         distance = await self._wall_distance()
         if distance is None or distance <= 0:
-            if color == "home":
-                raise AutopilotError("Home approach needs a valid ultrasonic reading. Stopped.")
             return action
         stop_cm = self._stop_cm(color, planner)
-        room = distance - stop_cm - SONAR_CLEARANCE_CM
-        if room <= 0:
+        room = distance - stop_cm
+        fitting = [ms for ms, cm in planner.forward_table if cm <= room]
+        if room <= 0 or not fitting:
             planner._enter("ARRIVED")
             return planner._action("arrived", f"Target centered, ultrasonic {distance:.0f} cm (stop at {stop_cm:.0f} cm).")
-        ms = self._fitting_forward_ms(planner, room)
-        if action.duration_ms > ms:
-            return planner._move("forward", ms, f"Ultrasonic {distance:.0f} cm: shortened step to stop at {stop_cm:.0f} cm.")
+        if action.duration_ms > fitting[-1]:
+            return planner._move("forward", fitting[-1], f"Ultrasonic {distance:.0f} cm: shorter step to stop at {stop_cm:.0f} cm.")
         return action
-
-    @staticmethod
-    def _fitting_forward_ms(planner, room):
-        table = sorted((ms, cm) for ms, cm in planner.forward_table if ms >= 50 and cm > 0)
-        if not table:
-            raise AutopilotError("Measure forward steps before autonomous approach.")
-        fitting = [ms for ms, cm in table if cm <= room]
-        if fitting:
-            return max(fitting)
-        ms, cm = table[0]
-        duration = int(ms * room / cm)
-        if duration < 50:
-            raise AutopilotError("Stopped short of the target: remaining distance is smaller than a safe timed step. Adjust manually; arrival is not confirmed.")
-        return duration
 
     async def _confirm_size_arrival(self, color: str, planner, action):
         """The camera says "looks big enough". If the ultrasonic can see the object (a reading a little
@@ -139,11 +148,12 @@ class Autopilot:
         stop_cm = self._stop_cm(color, planner)
         if distance is None or distance <= 0 or distance > stop_cm + 15:
             return action
-        room = distance - stop_cm - SONAR_CLEARANCE_CM
-        if room <= 0:
+        room = distance - stop_cm
+        fitting = [ms for ms, cm in planner.forward_table if cm <= room]
+        if room <= 0 or not fitting:
             return planner._action("arrived", f"Target centered, ultrasonic {distance:.0f} cm (stop at {stop_cm:.0f} cm).")
         planner._enter("APPROACH")
-        return planner._move("forward", self._fitting_forward_ms(planner, room), f"Looks close; ultrasonic {distance:.0f} cm: creeping to {stop_cm:.0f} cm.")
+        return planner._move("forward", fitting[-1], f"Looks close; ultrasonic {distance:.0f} cm: creeping to {stop_cm:.0f} cm.")
 
     # ------------------------------------------------------------ behaviors
     async def _wall_distance(self):
@@ -153,30 +163,29 @@ class Autopilot:
             return None
         return self.bridge.distance_cm
 
-    async def go_to(self, color: str, avoid: bool = True, max_steps: int | None = None) -> bool:
-        """Drive until repeated arrival confirmation or a bounded search timeout."""
-        color = "home" if color == "black" else color
+    async def go_to(self, color: str, avoid: bool = False, max_steps: int | None = None) -> bool:
+        """Drive to `color` until it arrives. Never gives up; max_steps is only for tests."""
+        color = "black" if color == "home" else color           # palette vision calls the flag "home"
         self.vision.set_target(color)
         planner = self._planner(color)
         seq = self._seq()
         decided_seq = seq        # newest frame at the previous decision
         move = None              # the last move: kind, ms and when the wheels turned
         relook = 0               # "look again" decisions left after turning back to a glimpse
-        steps = arrivals = 0
-        deadline = time.monotonic() + max(30, min(300, planner.s.explore_timeout_s or 120))
+        cooldown = 0             # moves left during which glimpses are ignored (a chase just failed)
+        steps = 0
         while max_steps is None or steps < max_steps:
-            if time.monotonic() >= deadline:
-                raise AutopilotError("Search time limit reached. Stopped; reposition or start a new run.")
             steps += 1
             det, free, free_obstacles = await self._fresh_view(seq)
-            if color == "home" and det is not None and det.detected and free_obstacles is not None:
+            if color == "black" and det is not None and det.detected and free_obstacles is not None:
                 free = free_obstacles               # heading for the wall itself: only obstacles block
             detected = det is not None and det.detected
             action = None
             if detected or planner.was_at_line:      # at the stop line, vanishing = arrived (planner decides)
-                relook = 0
+                relook = cooldown = 0
             else:
-                bearing = self._glimpse(color, decided_seq, move, planner)
+                # Don't chase a new glimpse while still checking the last one, or right after one failed.
+                bearing = None if (cooldown > 0 or relook > 0) else self._glimpse(color, decided_seq, move, planner)
                 if bearing is not None:
                     relook = 2
                     side = "right" if bearing > 0 else "left"
@@ -189,6 +198,8 @@ class Autopilot:
                 elif relook > 0:
                     relook -= 1
                     action = planner._action("stop", f"Looking again where {color} was seen ({2 - relook}/2).")
+                    if relook == 0:
+                        cooldown = GLIMPSE_COOLDOWN       # not there: probably a false flicker, keep searching
             decided_seq = self._seq()
             if action is None:
                 # The floor check always guards exploring (so it never drives into a wall); while
@@ -197,42 +208,21 @@ class Autopilot:
                 action = planner.decide(det, free if use_floor else None, None, camera_ok=True)
             if action.kind == "forward" and action.state == "APPROACH":
                 action = await self._ultrasonic_arrival(color, planner, action)
-            elif action.kind == "arrived":
-                if color == "home":
-                    action = await self._ultrasonic_arrival(color, planner, planner._move("forward", 200, "Verify base distance"))
-                else:
-                    action = await self._confirm_size_arrival(color, planner, action)
+            elif action.kind == "arrived" and color != "black":
+                action = await self._confirm_size_arrival(color, planner, action)
             elif action.kind == "forward" and action.state in ("EXPLORE", "AVOID"):
                 distance = await self._wall_distance()
                 limit = planner.s.wall_distance_cm
-                if distance is None or distance <= 0:
-                    raise AutopilotError("Exploration needs a valid wall-distance reading. Stopped.")
-                if distance <= limit + SONAR_CLEARANCE_CM:
+                if distance is not None and 0 < distance < limit:
                     action = planner.wall_ahead(distance, free)
-                else:
-                    ms = self._fitting_forward_ms(planner, distance - limit - SONAR_CLEARANCE_CM)
-                    if action.duration_ms > ms:
-                        action = planner._move("forward", ms, "Shortened exploration step to preserve wall clearance.")
             self.report("running", f"{color}: {action.state} → {action.label()}")
-            if action.kind == "give_up" or action.state == "GIVE_UP":
-                raise AutopilotError(action.reason)
             if action.kind == "arrived":
-                if await self.bridge.stop() is not True:
-                    raise AutopilotError("Arrival STOP was not acknowledged.")
-                if not detected or abs(det.horizontal_error) > planner.s.aim_deadband:
-                    arrivals = 0
-                    planner.reset()
-                else:
-                    arrivals += 1
-                    if arrivals >= 3:
-                        self.report("arrived", f"Stopped at {color}. {action.reason}")
-                        return True
-                planner._enter("APPROACH")  # re-evaluate arrival on each fresh frame
-                seq = self._seq()
-                continue
-            arrivals = 0
+                self.report("arrived", f"Arrived at {color}. {action.reason}")
+                return True
             seq = self._seq()
             move = None
+            if cooldown > 0 and action.kind in MOVE_TO_DIRECTION and relook == 0:
+                cooldown -= 1
             if action.kind in MOVE_TO_DIRECTION:
                 started = time.monotonic()
                 await self._step(action.kind, action.pwm, action.duration_ms)
@@ -262,27 +252,34 @@ class Autopilot:
             self.report("running", f"Turning around: step {i}/{len(plan)} ({ms} ms)")
             await self._step(f"turn_{TURN_DIRECTION}", self.vision.cfg["navigation"].get("turn_pwm", 60), ms)
 
-    async def collect(self, color: str, avoid: bool = True) -> bool:
-        """Stop at the ore and signal sample success without actuating a gripper."""
-        if color not in ("red", "green"):
-            raise AutopilotError("Sample targets are red or green; blue is an obstacle.")
+    async def collect(self, color: str, avoid: bool = False) -> bool:
+        """Drive to a mineral and stop ~10 cm away. The pilot then takes manual control: drives up,
+        grabs it ("Sample collected" turns the LEDs green) and drives it back to base."""
+        if color == "black":
+            return await self.go_to(color, avoid=avoid)
         await self._led(RED)
         await self.go_to(color, avoid=avoid)
-        await self._led(GREEN)
-        self.report("sample_reached", f"Stopped at {color}. Sample reached: green LEDs and happy display.")
+        self.report("arrived", f"Arrived about 10 cm from {color}. Take manual control: drive up, grab it, "
+                               "press Sample collected, then drive it back to base.")
         return True
 
-    async def return_to_base(self, avoid: bool = True) -> bool:
-        """Reacquire the home flag, stop at the wall, and reset the LEDs to red."""
-        # Reacquire the actual flag from the current heading; no blind 180-degree assumption.
-        await self.go_to("home", avoid=avoid)
-        await self._led(RED)
-        self.report("home_arrived", "Stopped at the black home flag. Mission complete; LEDs red.")
-        return True
-
-    async def mission(self, color: str, avoid: bool = True, pause_s: float = 3.0) -> bool:
-        """Reach a red/green ore, celebrate while stopped, then automatically return home."""
+    async def collect_and_signal(self, color: str, avoid: bool = False) -> bool:
+        """Old fully automatic flow: arrival itself counts as collected (LEDs green). Used by mission()."""
         await self.collect(color, avoid=avoid)
-        await asyncio.sleep(max(0.0, min(10.0, pause_s)))
-        self.report("running", "Sample signalled. Searching for the black home flag; LEDs stay green until home.")
+        await self._led(GREEN)
+        self.report("collected", f"Sample collected: {color}. LEDs green.")
+        return True
+
+    async def return_to_base(self, avoid: bool = False) -> bool:
+        """Turn around, drive to the black flag; then 'Sample deposited' and the LEDs go back to red."""
+        await self.turn_around()
+        await self.go_to("black", avoid=avoid)
+        self.report("deposited", "Sample deposited at home base. LEDs red.")
+        await self._led(RED)
+        return True
+
+    async def mission(self, color: str, avoid: bool = False, pause_s: float = 3.0) -> bool:
+        """The whole run: collect the mineral, pause (pickup), return to base."""
+        await self.collect_and_signal(color, avoid=avoid)
+        await asyncio.sleep(pause_s)
         return await self.return_to_base(avoid=avoid)
