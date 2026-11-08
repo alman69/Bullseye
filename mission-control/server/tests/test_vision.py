@@ -267,3 +267,21 @@ def test_hsv_range_command(vision_dir):
                 {"color": "purple", "h": [0, 10], "s": [0, 255], "v": [0, 255]}):
         with pytest.raises(CommandError):
             run(svc, "vision_hsv", bad)
+
+
+def test_teach_hsv_from_a_box(vision_dir):
+    svc = service(vision_dir)
+    pale_green = (95, 140, 85)                                    # pale green: saturation ~100, below the range
+    svc._process(arena(block_bottom=450, block_x=400, size=80, color=pale_green), 1)
+    run(svc, "vision_hsv", {"color": "green", "h": [50, 85], "s": [150, 255], "v": [60, 255]})
+    svc.set_target("green")
+    assert not svc._process(arena(block_bottom=450, block_x=400, size=80, color=pale_green), 2)["detection"]["detected"]
+    run(svc, "vision_hsv_teach", {"color": "green", "box": [0.47, 0.68, 0.53, 0.74]})   # inside the block
+    taught = svc.summary()["hsv"]["green"]
+    assert taught["s"][0] < 150 and svc.summary()["hsv_undo"] == 1
+    assert svc._process(arena(block_bottom=450, block_x=400, size=80, color=pale_green), 3)["detection"]["detected"]
+    assert "rest of the view" in svc.message
+    run(svc, "vision_hsv_undo")
+    assert svc.summary()["hsv"]["green"] == {"h": [50, 85], "s": [150, 255], "v": [60, 255]}
+    with pytest.raises(CommandError):                             # a box on plain floor teaches nothing
+        run(svc, "vision_hsv_teach", {"color": "green", "box": [0.05, 0.85, 0.15, 0.95]})
