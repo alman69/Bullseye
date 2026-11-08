@@ -1,5 +1,13 @@
 # Bullseye laptop vision (Phase 1)
 
+> **Now built into Mission Control.** The dashboard (`/` and `/bench`) shows the detection
+> overlay, floor strips, stop line and the planner's dry-run move. It also has a
+> **Calibration** panel (colors, stop line, field of view, steps, tuning) that saves to this
+> folder. See [docs/MISSION_CONTROL.md → Vision](../../docs/MISSION_CONTROL.md#vision-built-in).
+> This standalone app still works: use it for offline replays (`--source`) and headless logs,
+> or when Mission Control isn't holding the camera. The code now lives in the
+> `bullseye_vision/` package; every command below is unchanged.
+
 Laptop-side color-target detection (red, yellow, green, blue) for the ELEGOO Smart Robot Car V4.0's
 ESP32-WROVER camera. It uses Python, OpenCV and NumPy: HSV thresholds, no
 machine learning. It does **not** drive motors, does **not** serve Mission

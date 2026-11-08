@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import unittest
 
-from detector import Detection
-from freespace import FreeSpace
-from planner import (APPROACH, ARRIVED, ARRIVED_ACTION, AVOID, BACKWARD, EXPLORE, FORWARD, GIVE_UP,
+from bullseye_vision.detector import Detection
+from bullseye_vision.freespace import FreeSpace
+from bullseye_vision.planner import (APPROACH, ARRIVED, ARRIVED_ACTION, AVOID, BACKWARD, EXPLORE, FORWARD, GIVE_UP,
                      READ_DISTANCE, SEARCH, STOP, TURN_LEFT, TURN_RIGHT, NavSettings, Planner)
 
 BEARINGS = [-0.8, -0.4, 0.0, 0.4, 0.8]

@@ -11,9 +11,9 @@ import cv2
 import numpy as np
 
 import ground_calib
-from config import DEFAULT_CONFIG_PATH, load_config
-from detector import ColorDetector
-from ground import GroundModel
+from bullseye_vision.config import DEFAULT_CONFIG_PATH, load_config
+from bullseye_vision.detector import ColorDetector
+from bullseye_vision.ground import GroundModel
 
 HORIZON, A, K = 0.35, 6.0, 2.5           # synthetic pinhole camera: y = horizon + A/d, width = K/d
 

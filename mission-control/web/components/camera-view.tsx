@@ -3,15 +3,19 @@ import { Camera, Expand, Radio, VideoOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { socketUrl } from "@/hooks/use-mission";
 import type { MissionState } from "@/lib/protocol";
+import { VisionOverlay } from "@/components/vision-overlay";
+import type { VisionOverlayOptions } from "@/lib/vision";
 
 export function CameraView({
   state,
   connected,
   onStop,
+  vision,
 }: {
   state: MissionState | null;
   connected: boolean;
   onStop: () => void;
+  vision?: VisionOverlayOptions;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -126,6 +130,7 @@ export function CameraView({
               : source === "simulation" ? "Simulated rover camera feed" : "Rover camera feed unavailable"
           }
         />
+        {vision && hasFrame && <VisionOverlay {...vision} />}
         {!hasFrame && (
           <div className="camera-empty">
             <Camera size={30} />

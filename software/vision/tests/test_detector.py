@@ -9,8 +9,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from config import DEFAULTS, load_config, save_config
-from detector import CENTER, LEFT, NONE, RIGHT, ColorDetector, HsvRange, direction_for
+from bullseye_vision.config import DEFAULTS, load_config, save_config
+from bullseye_vision.detector import CENTER, LEFT, NONE, RIGHT, ColorDetector, HsvRange, direction_for
 
 W, H = 640, 480
 BGR = {"red": (0, 0, 255), "yellow": (0, 230, 230), "green": (0, 200, 0), "blue": (255, 0, 0)}

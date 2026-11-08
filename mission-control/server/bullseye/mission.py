@@ -10,7 +10,7 @@ from .camera import CameraHub
 from .config import Settings
 
 
-COLORS = {"red", "green", "blue"}
+COLORS = {"red", "green", "blue", "yellow"}
 
 
 def utc_now():
@@ -43,6 +43,7 @@ class MissionControl:
         self.subscribers: set[asyncio.Queue] = set()
         self.jobs: set[asyncio.Task] = set()
         self.watchdog = None
+        self.vision = None   # VisionService, attached by create_app when enabled
         self.log("Mission Control online. Simulator ready." if settings.mode == "simulation"
                  else "Hardware mode. Waiting for a rover adapter.")
 
@@ -66,6 +67,7 @@ class MissionControl:
                            if self.settings.mode == "simulation" else self.adapter.distance_cm,
             "last_stop_acknowledged": self.last_stop_acknowledged,
             "events": list(self.events),
+            "vision": self.vision.summary() if self.vision else None,
         }
 
     def publish(self):
@@ -174,8 +176,10 @@ class MissionControl:
                     self.require_phase("idle", "completed")
                     color = payload.get("color")
                     if color not in COLORS:
-                        raise CommandError("Choose red, green, or blue.")
+                        raise CommandError("Choose red, green, blue, or yellow.")
                     self.target = color
+                    if self.vision:
+                        self.vision.set_target(color)
                 elif kind == "start":
                     self.require_capability("mission")
                     self.require_phase("idle", "completed")

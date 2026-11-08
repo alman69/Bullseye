@@ -1,4 +1,6 @@
-export type SampleColor = "red" | "green" | "blue";
+import type { VisionSummary } from "@/lib/vision";
+
+export type SampleColor = "red" | "green" | "blue" | "yellow";
 export type Phase =
   | "idle"
   | "searching"
@@ -64,6 +66,7 @@ export type MissionState = {
     distance_age_ms?: number | null;
   };
   events: { id: string; at: string; message: string; level: string }[];
+  vision?: VisionSummary | null;
 };
 export type CommandPayload = Record<string, unknown>;
 export type LinkLatency = {
@@ -89,4 +92,5 @@ export const SAMPLE_HEX: Record<SampleColor, string> = {
   red: "#f06b7c",
   green: "#65c79b",
   blue: "#79aaf4",
+  yellow: "#f2d15c",
 };

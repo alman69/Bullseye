@@ -15,7 +15,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from camera import CameraStream, FileSource, MjpegParser, RateMeter
+from bullseye_vision.camera import CameraStream, FileSource, MjpegParser, RateMeter
 
 BOUNDARY = b"123456789000000000000987654321"
 

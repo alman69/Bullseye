@@ -138,10 +138,10 @@ class CameraHub:
         approaching = phase in {"approaching", "awaiting_confirmation", "collecting", "collected"}
         progress = min(age / max(self.settings.approach_seconds, .01), 1) if phase == "approaching" else 1
         colors = {"red": ("#d64857", "#f79599"), "green": ("#499c77", "#8dd7ad"),
-                  "blue": ("#588bc5", "#9ac2ee")}
+                  "blue": ("#588bc5", "#9ac2ee"), "yellow": ("#e2c13c", "#f5e08c")}
         selected = self.scene["target"]
         for index, (name, (base, light)) in enumerate(colors.items()):
-            x, y, r = [(225, 285, 29), (570, 260, 23), (635, 342, 38)][index]
+            x, y, r = [(225, 285, 29), (570, 260, 23), (635, 342, 38), (110, 330, 26)][index]
             if name == selected and approaching:
                 x = int(x + (400-x)*progress)
                 y = int(y + (323-y)*progress)
