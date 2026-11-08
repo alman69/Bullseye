@@ -30,6 +30,67 @@ DEFAULTS: dict = {
         "morph_kernel": 5,
         "center_deadband": 0.12,
     },
+    "floor": {
+        "roi_top": 0.5,
+        "strips": 5,
+        "s_max": 45,
+        "v_min": 90,
+        "blocked_height": 0.35,
+        "corridor_half_width": 0.45,
+        "column_percentile": 25,
+        "work_width": 160,
+        "morph_kernel": 3,
+        "target_dilate": 7,
+        "min_floor_visible": 0.3,
+    },
+    "navigation": {
+        "turn_pwm": 60,
+        "drive_pwm": 60,
+        "aim_deadband": 0.12,
+        "turn_min_ms": 80,
+        "turn_max_ms": 250,
+        "forward_ms": 300,
+        "slow_forward_ms": 150,
+        "slow_area_ratio": 0.04,
+        "arrive_area_ratio": 0.08,
+        "arrive_distance_cm": 20,
+        "emergency_distance_cm": 10,
+        "distance_check_every": 3,
+        "lost_decisions": 3,
+        "search_turn_ms": 300,
+        "search_turns": 8,
+        "avoid_turn_ms": 300,
+        "avoid_forward_steps": 2,
+        "avoid_max_retries": 4,
+        "backoff_ms": 300,
+        "explore_steps": 3,
+        "explore_timeout_s": 120,
+        "decision_period_s": 0.5,
+        "arrival_mode": "camera",
+        "approach_zone_y": 0.08,
+        "camera_hfov_deg": 0,
+        "steps": {"forward": {}, "turn": {}},
+    },
+    "ground": {
+        "points": [],
+        "width_k": None,
+        "horizon_y": None,
+        "stop_line_y": None,
+        "size_tolerance": 2.0,
+    },
+    "classifier": {
+        "mode": "auto",
+        "model_path": "color_model.json",
+        "samples_path": "captures/samples.npz",
+        "max_distance": 4.0,
+        "regularization": 4.0,
+        "white_balance": True,
+        "wb_alpha": 0.2,
+        "wb_min_floor": 0.02,
+        "wb_gain_min": 0.6,
+        "wb_gain_max": 1.6,
+        "floor_class": "floor",
+    },
     "colors": {
         "red": {"h": [170, 10], "s": [120, 255], "v": [70, 255]},
         "yellow": {"h": [20, 35], "s": [100, 255], "v": [100, 255]},
@@ -42,7 +103,7 @@ DEFAULTS: dict = {
 def _merge(base: dict, override: dict) -> dict:
     out = copy.deepcopy(base)
     for key, value in override.items():
-        if isinstance(value, dict) and isinstance(out.get(key), dict) and key != "controls":
+        if isinstance(value, dict) and isinstance(out.get(key), dict) and key not in ("controls", "forward", "turn"):
             out[key] = _merge(out[key], value)
         else:
             out[key] = copy.deepcopy(value)

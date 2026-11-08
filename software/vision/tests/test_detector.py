@@ -146,7 +146,7 @@ class DetectorTests(unittest.TestCase):
         json.dumps(out)
         expected = {"target_color", "detected", "center_x", "center_y", "frame_width", "frame_height",
                     "horizontal_error", "area", "area_ratio", "bbox", "direction", "candidates",
-                    "frame_id", "timestamp", "processing_ms"}
+                    "frame_id", "timestamp", "processing_ms", "bottom_y", "distance_cm_est"}
         self.assertEqual(set(out), expected)
         self.assertAlmostEqual(out["horizontal_error"], -0.5, delta=0.01)
         self.assertEqual(out["direction"], LEFT)
