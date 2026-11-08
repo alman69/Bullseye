@@ -328,7 +328,7 @@ the action and the floor strips.
 
 | Setting | Default | Adjust when |
 |---|---|---|
-| `floor.s_max` | 50 | Floor shows as blocked (raise it), or cardboard shows as floor (lower it). Click pixels to read their S value; floor and cardboard should be on opposite sides of this number |
+| `floor.s_max` | 45 | Floor shows as blocked (raise it), or cardboard shows as floor (lower it). Click pixels to read their S value; floor and cardboard should be on opposite sides of this number |
 | `floor.v_min` | 90 | Dark shadows on the floor are counted as obstacles (lower it) |
 | `floor.roi_top` | 0.5 | Fraction of the image height where the analyzed area starts. Lower = looks further ahead |
 | `floor.blocked_height` | 0.35 | A wall at ~50 cm counts as blocked (lower it), or the rover gets too close before reacting (raise it) |
@@ -343,3 +343,117 @@ The headless log works too: `main.py --navigate --headless --duration 60 > nav.j
 **Not in the dry run:** real motor commands, the ultrasonic sensor, and the servo sweep. These come
 when the planner moves into Mission Control's rover adapter. Every move there will be one N2 timed
 command, and servo/LED commands will be sent only while stopped (see `docs/HANDOFF.md`).
+
+## 11. Better detection for small blocks: color classifier, stop line, calibrated steps
+
+The fixed HSV ranges missed the small cubes in the first arena test. Far cubes are pale on this
+camera, yellow overlaps cardboard, and orange paper sits next to red. The vision app now has a
+better method:
+
+- **Floor-referenced white balance:** each frame, the white floor near the bottom is compared with
+  its color at calibration time, and the image is corrected. This cancels the camera's color drift
+  and a floodlight's color temperature.
+- **Material classifier** (`colorclass.py`): every pixel is assigned to the **closest real material**
+  you sampled: red, green, blue, yellow, floor, cardboard, obstacle. Cardboard and paper are classes
+  of their own, so they compete with the minerals instead of leaking into them. It runs as a lookup
+  table, a few ms per frame.
+- **Ground checks** (`ground.py`): after calibration, anything whose bottom edge is above the
+  arena floor (the room behind the walls), or whose size is wrong for a block at that distance, is
+  ignored. Detections get `distance_cm_est`.
+- **Camera-only arrival** (small blocks sit below the ultrasonic beam): stop when the block's bottom
+  edge reaches the calibrated **stop line**, or when it slips out the bottom of the view while
+  centered next to the line. The ultrasonic sensor is only a wall backstop, ignored near the target.
+
+`classifier.mode` is `auto`: the classifier is used once `color_model.json` exists, otherwise HSV.
+Use `--detector hsv` or `--detector classifier` to force one. Colors the model doesn't know still use
+their HSV range.
+
+On saved photos from the 2026-11-07 arena run, with a model built from small boxes on those same
+photos:
+- the classifier found the red, yellow and green cubes that HSV missed
+- the remaining false hits were above the arena (removed by the ground check) and dark floor in the
+  bottom corners (fixed by sampling shadowed and corner floor)
+
+**This hasn't been verified live.**
+
+### Calibration, in order (about 30 minutes)
+
+**1. Colors** (redo under the floodlight when it arrives):
+```bash
+.venv/bin/python main.py
+```
+- Press `k` for sampling mode, then pick a class:
+
+  | Key | Class |
+  |---|---|
+  | `1` | red |
+  | `2` | green |
+  | `3` | blue |
+  | `4` | yellow |
+  | `5` | floor |
+  | `6` | cardboard |
+  | `7` | obstacle (paper) |
+
+- **Drag a tight box** inside the object, so it doesn't include floor around a block. Do 3–5 boxes per
+  class:
+  - near and far blocks
+  - lit and shadowed sides
+  - for **floor:** the bright middle, shadows, **and the darker bottom corners** of the image
+  - for **cardboard:** walls in light and in shadow
+- `u` undoes the last box. Samples are kept in `captures/samples.npz`, so you can add more later.
+- Press `m` to fit. It saves `color_model.json` and prints a table like:
+  ```
+  sampled ->       red    green ... cardboard obstacle  unknown
+         red     98.7%     0.0% ...      0.0%     0.3%     1.0%
+  ```
+  - Each row is what that class's samples were classified as. Aim for **≥ 95% on the diagonal** and
+    **< 2%** between a mineral and floor/cardboard/obstacle.
+  - If a pair is confused, add samples of both and press `m` again. If they still overlap, the
+    colors are too similar on this camera: repaint or swap one.
+- **Offline option:** sample from saved snapshots with `main.py --source captures/` (`n` = next image).
+
+**2. Stop line and distance:** with a block centered straight ahead at **10, 15, 20 and 30 cm**
+(measured from the front bumper), press its color key and `s` at each distance. Then:
+```bash
+.venv/bin/python ground_calib.py stopline --distances 10,15,20,30 \
+    captures/<10cm>_result.json captures/<15cm>_result.json captures/<20cm>_result.json captures/<30cm>_result.json
+```
+- This writes `ground` to `config.json`: the distance mapping, `horizon_y`, and `stop_line_y` for
+  `navigation.arrive_distance_cm` (20 cm by default; change it first if you want another distance).
+- The app then draws the **STOP LINE** and shows `~N cm` for the target.
+- **Afterwards, lower `detector.min_area_px` to about 80.** The size check now rejects small specks,
+  so far blocks can be detected.
+
+**3. Camera field of view (no motors):** a block at 30 cm, once centered and once 10 cm to the side.
+Press `s` for each, then:
+```bash
+.venv/bin/python ground_calib.py fov --distance-cm 30 --offset-cm 10 captures/<center>_result.json captures/<side>_result.json
+```
+
+**4. Step sizes on the floor, using faiyaz's `/bench` page** (close the vision app first: the camera
+serves only one viewer):
+- Set PWM to **60**.
+- Run **forward** 0.2 / 0.5 / 1.0 s, 5 times each; measure cm with a ruler.
+- Run **left and right turns** 0.2 / 0.5 s, 5 times each; measure degrees.
+- Put the averages in `config.json`:
+  ```json
+  "steps": {"forward": {"200": 4.0, "500": 11.0, "1000": 23.0}, "turn": {"200": 15.0, "500": 40.0}}
+  ```
+- Also set `navigation.search_turn_ms` / `avoid_turn_ms` to the step closest to 45°.
+- With steps and field of view set, the planner sizes each turn from the needed angle (the largest
+  step that doesn't overshoot) and each forward step from the remaining distance (≤ 70% of it). It
+  uses the smallest step inside the approach zone.
+
+**5. Re-run the dry-run table (§10, rows B–E and I):**
+```bash
+.venv/bin/python main.py --navigate --color red
+```
+- Expect `NEXT: FORWARD 1000 ms … About 40 cm to go` when far, and short steps near the magenta
+  line.
+- Expect `ARRIVED … Bottom edge reached the stop line (about 20 cm)` at the line.
+- Send the snapshots back.
+
+**Tuning:** `classifier.max_distance` (4.0) controls how strict "close enough to a class" is.
+Lower it if odd colors get labeled as minerals, raise it if real blocks show as unknown.
+`navigation.approach_zone_y` (0.08) is the band above the stop line where steps get small and the
+ultrasonic sensor is ignored.

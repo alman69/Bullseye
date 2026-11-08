@@ -16,10 +16,23 @@
     "morph_kernel": 5,
     "center_deadband": 0.12
   },
+  "classifier": {
+    "mode": "auto",
+    "model_path": "color_model.json",
+    "samples_path": "captures/samples.npz",
+    "max_distance": 4.0,
+    "regularization": 4.0,
+    "white_balance": true,
+    "wb_alpha": 0.2,
+    "wb_min_floor": 0.02,
+    "wb_gain_min": 0.6,
+    "wb_gain_max": 1.6,
+    "floor_class": "floor"
+  },
   "floor": {
     "roi_top": 0.5,
     "strips": 5,
-    "s_max": 50,
+    "s_max": 45,
     "v_min": 90,
     "blocked_height": 0.35,
     "corridor_half_width": 0.45,
@@ -28,6 +41,13 @@
     "morph_kernel": 3,
     "target_dilate": 7,
     "min_floor_visible": 0.3
+  },
+  "ground": {
+    "points": [],
+    "width_k": null,
+    "horizon_y": null,
+    "stop_line_y": null,
+    "size_tolerance": 2.0
   },
   "navigation": {
     "turn_pwm": 60,
@@ -51,7 +71,14 @@
     "backoff_ms": 300,
     "explore_steps": 3,
     "explore_timeout_s": 120,
-    "decision_period_s": 0.5
+    "decision_period_s": 0.5,
+    "arrival_mode": "camera",
+    "approach_zone_y": 0.08,
+    "camera_hfov_deg": 0,
+    "steps": {
+      "forward": {},
+      "turn": {}
+    }
   },
   "colors": {
     "red": {

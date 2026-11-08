@@ -11,11 +11,16 @@ from planner import (APPROACH, ARRIVED, ARRIVED_ACTION, AVOID, BACKWARD, EXPLORE
 BEARINGS = [-0.8, -0.4, 0.0, 0.4, 0.8]
 
 
-def det(err=None, area_ratio=0.01):
+def det(err=None, area_ratio=0.01, bottom=None, dist=None):
     if err is None:
         return Detection("red", False, 800, 600)
-    return Detection("red", True, 800, 600, center_x=int(400 + err * 400), center_y=300,
-                     horizontal_error=err, area=area_ratio * 480000, area_ratio=area_ratio)
+    bottom = 0.6 if bottom is None else bottom
+    d = Detection("red", True, 800, 600, center_x=int(400 + err * 400), center_y=int(bottom * 600) - 20,
+                  horizontal_error=err, area=area_ratio * 480000, area_ratio=area_ratio,
+                  bbox=[int(380 + err * 400), int(bottom * 600) - 40, 40, 40])
+    d.bottom_y = bottom
+    d.distance_cm_est = dist
+    return d
 
 
 def free(heights=(1, 1, 1, 1, 1), visible=True, threshold=0.35):
@@ -74,6 +79,7 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(self.p.decide(det(0.0), CLEAR, distance_cm=80, now=6).kind, FORWARD)
 
     def test_arrival_needs_ultrasonic(self):
+        self.p = Planner(NavSettings(arrival_mode="ultrasonic"), use_distance=True)
         close = det(0.02, 0.12)
         self.assertEqual(self.p.decide(close, CLEAR, now=0).kind, READ_DISTANCE)
         a = self.p.decide(close, CLEAR, distance_cm=45, now=1)       # big in image but still far
@@ -85,6 +91,7 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(self.p.decide(close, CLEAR, now=4).kind, STOP)
 
     def test_no_echo_is_not_arrival(self):
+        self.p = Planner(NavSettings(arrival_mode="ultrasonic"), use_distance=True)
         close = det(0.0, 0.12)
         self.p.decide(close, CLEAR, now=0)
         a = self.p.decide(close, CLEAR, distance_cm=0, now=1)
@@ -95,7 +102,7 @@ class PlannerTests(unittest.TestCase):
         p = Planner(self.s, use_distance=False)
         a = p.decide(det(0.0, 0.12), CLEAR, now=0)
         self.assertEqual(a.kind, ARRIVED_ACTION)
-        self.assertIn("vision only", a.reason)
+        self.assertIn("size only", a.reason)        # no stop line calibrated yet
         for i in range(5):                                            # never a distance request
             self.assertNotEqual(Planner(self.s, use_distance=False).decide(det(0.0), CLEAR, now=i).kind, READ_DISTANCE)
 
@@ -153,6 +160,100 @@ class PlannerTests(unittest.TestCase):
         a = self.p.decide(det(-0.5), CLEAR, now=0)
         self.assertTrue(a.label().startswith("TURN LEFT "))
         self.assertEqual(set(a.to_dict()), {"kind", "duration_ms", "pwm", "state", "reason"})
+
+
+class CameraArrivalTests(unittest.TestCase):
+    STOP = 0.85
+
+    def planner(self, **kw):
+        return Planner(NavSettings(**kw), use_distance=True, stop_line_y=self.STOP)
+
+    def test_arrives_when_bottom_edge_reaches_line(self):
+        p = self.planner()
+        self.assertEqual(p.decide(det(0.0, bottom=0.6), CLEAR, now=0).kind, FORWARD)
+        a = p.decide(det(0.02, bottom=0.86, dist=19), CLEAR, now=1)
+        self.assertEqual(a.kind, ARRIVED_ACTION)
+        self.assertIn("stop line", a.reason)
+        self.assertEqual(p.state, ARRIVED)
+
+    def test_off_center_at_line_turns_first(self):
+        p = self.planner()
+        a = p.decide(det(0.4, bottom=0.9), CLEAR, now=0)
+        self.assertEqual(a.kind, TURN_RIGHT)
+
+    def test_dropping_out_of_view_at_line_is_arrival(self):
+        p = self.planner()
+        p.decide(det(0.0, bottom=0.80), CLEAR, now=0)       # centered, inside the approach zone
+        a = p.decide(det(), CLEAR, now=1)                    # gone out the bottom
+        self.assertEqual(a.kind, ARRIVED_ACTION)
+
+    def test_losing_far_target_is_not_arrival(self):
+        p = self.planner()
+        p.decide(det(0.0, bottom=0.5), CLEAR, now=0)
+        self.assertEqual(p.decide(det(), CLEAR, now=1).kind, STOP)
+        self.assertNotEqual(p.state, ARRIVED)
+
+    def test_small_steps_in_approach_zone(self):
+        p = self.planner()
+        far = p.decide(det(0.0, bottom=0.5), CLEAR, now=0)
+        near = p.decide(det(0.0, bottom=0.80), CLEAR, now=1)
+        self.assertEqual(far.duration_ms, p.s.forward_ms)
+        self.assertEqual(near.duration_ms, p.s.slow_forward_ms)
+
+    def test_ultrasonic_ignored_near_target(self):
+        p = self.planner()
+        a = p.decide(det(0.0, bottom=0.80), CLEAR, distance_cm=6, now=0)   # the block / wall right behind it
+        self.assertNotEqual(a.kind, BACKWARD)
+        for i in range(6):                                                   # no periodic checks in the zone
+            self.assertNotEqual(p.decide(det(0.0, bottom=0.79), CLEAR, now=1 + i).kind, READ_DISTANCE)
+
+    def test_ultrasonic_backstop_far_from_target(self):
+        p = self.planner()
+        p.decide(det(0.0, bottom=0.5), CLEAR, now=0)
+        self.assertEqual(p.decide(det(0.0, bottom=0.5), CLEAR, distance_cm=6, now=1).kind, BACKWARD)
+
+    def test_never_reads_distance_for_arrival_in_camera_mode(self):
+        p = self.planner()
+        kinds = [p.decide(det(0.0, area_ratio=0.2, bottom=0.6), CLEAR, now=i).kind for i in range(3)]
+        self.assertNotIn(READ_DISTANCE, kinds)
+
+    def test_give_up_recovers_when_target_seen(self):
+        p = self.planner()
+        p.state = GIVE_UP
+        self.assertEqual(p.decide(det(), CLEAR, now=0).kind, STOP)
+        p.decide(det(0.0, bottom=0.5), CLEAR, now=1)
+        self.assertEqual(p.state, APPROACH)
+
+    def test_explore_step_is_labeled_explore(self):
+        p = Planner(NavSettings(explore_steps=1), use_distance=False)
+        p.state = EXPLORE
+        a = p.decide(det(), CLEAR, now=0)
+        self.assertEqual((a.kind, a.state), (FORWARD, EXPLORE))
+        self.assertEqual(p.state, SEARCH)
+
+
+class StepTableTests(unittest.TestCase):
+    STEPS = {"forward": {"200": 3.0, "500": 9.0, "1000": 20.0}, "turn": {"200": 12.0, "500": 35.0}}
+
+    def planner(self):
+        return Planner(NavSettings(steps=self.STEPS, camera_hfov_deg=60), use_distance=False, stop_line_y=0.85)
+
+    def test_forward_step_sized_by_remaining_distance(self):
+        p = self.planner()
+        self.assertEqual(p.decide(det(0.0, bottom=0.5, dist=60), CLEAR, now=0).duration_ms, 1000)  # 40 cm to go
+        self.assertEqual(p.decide(det(0.0, bottom=0.6, dist=34), CLEAR, now=1).duration_ms, 500)   # 14 cm
+        self.assertEqual(p.decide(det(0.0, bottom=0.65, dist=25), CLEAR, now=2).duration_ms, 200)  # 5 cm
+        self.assertEqual(p.decide(det(0.0, bottom=0.80, dist=22), CLEAR, now=3).duration_ms, 200)  # zone
+
+    def test_turn_step_sized_by_angle(self):
+        p = Planner(NavSettings(steps=self.STEPS, camera_hfov_deg=80), use_distance=False, stop_line_y=0.85)
+        self.assertEqual(p.decide(det(-0.9, bottom=0.5), CLEAR, now=0).duration_ms, 500)   # 36 deg: 35 deg step fits
+        self.assertEqual(p.decide(det(-0.8, bottom=0.5), CLEAR, now=1).duration_ms, 200)   # 32 deg: 35 would overshoot
+        self.assertEqual(p.decide(det(0.15, bottom=0.5), CLEAR, now=2).duration_ms, 200)   # 6 deg: smallest step
+
+    def test_ignores_invalid_table_entries(self):
+        p = Planner(NavSettings(steps={"forward": {"200": 0, "x": 3}, "turn": {}}))
+        self.assertEqual(p.forward_table, [])
 
 
 if __name__ == "__main__":

@@ -14,8 +14,19 @@ States:
            the side with more floor, step forward, turn back
   EXPLORE  nothing found after a full circle: drive toward the most open floor,
            then SEARCH again; give up after `explore_timeout_s`
-  ARRIVED  target centered, large, and (if available) ultrasonic <= arrive distance
-  GIVE_UP  explored too long; ask the pilot
+  ARRIVED  arrival_mode "camera" (default, for small blocks below the ultrasonic beam):
+           target centered and its bottom edge at/below the calibrated stop line,
+           or it dropped out of the bottom of the view while centered next to the line.
+           arrival_mode "ultrasonic" (tall ores): centered, large, ultrasonic <= arrive distance.
+  GIVE_UP  explored too long; ask the pilot (recovers as soon as the target is seen)
+
+The ultrasonic sensor is a wall/tall-obstacle backstop. Its reactions are
+ignored while the target is centered and inside the approach zone, so a block
+in front of a wall never triggers a back-off.
+
+With a calibrated step table (navigation.steps, measured on the floor) and
+camera_hfov_deg, turn and forward steps are sized from the needed angle and the
+estimated remaining distance; otherwise fixed durations are used.
 
 The rover has no wheel encoders, so it does not know where it is in the arena;
 every decision is based on the current view only.
@@ -23,7 +34,7 @@ every decision is based on the current view only.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 SEARCH, APPROACH, AVOID, EXPLORE, ARRIVED, GIVE_UP = "SEARCH", "APPROACH", "AVOID", "EXPLORE", "ARRIVED", "GIVE_UP"
 TURN_LEFT, TURN_RIGHT, FORWARD, BACKWARD = "turn_left", "turn_right", "forward", "backward"
@@ -72,6 +83,10 @@ class NavSettings:
     explore_steps: int = 3              # forward steps per exploration leg
     explore_timeout_s: float = 120
     decision_period_s: float = 0.5      # dry run only: how often to decide (approximates move + settle)
+    arrival_mode: str = "camera"        # "camera" (stop line) or "ultrasonic" (tall ores)
+    approach_zone_y: float = 0.08       # band above the stop line: tiny steps, ultrasonic ignored
+    camera_hfov_deg: float = 0.0        # 0 = not calibrated (ground_calib.py fov)
+    steps: dict = field(default_factory=lambda: {"forward": {}, "turn": {}})  # {"200": cm or deg, ...}
 
     @classmethod
     def from_dict(cls, d: dict) -> "NavSettings":
@@ -79,10 +94,26 @@ class NavSettings:
 
 
 class Planner:
-    def __init__(self, settings: NavSettings | None = None, use_distance: bool = True):
+    def __init__(self, settings: NavSettings | None = None, use_distance: bool = True,
+                 stop_line_y: float | None = None):
         self.s = settings or NavSettings()
         self.use_distance = use_distance   # False in the vision-only dry run
+        self.stop_line_y = stop_line_y     # from the ground calibration (normalized row)
+        self.forward_table = self._table(self.s.steps.get("forward"))
+        self.turn_table = self._table(self.s.steps.get("turn"))
         self.reset()
+
+    @staticmethod
+    def _table(raw) -> list:
+        """{"200": 4.5, ...} -> [(200, 4.5), ...] sorted by duration; ignores empty/invalid entries."""
+        out = []
+        for ms, value in (raw or {}).items():
+            try:
+                if float(value) > 0:
+                    out.append((int(ms), float(value)))
+            except (TypeError, ValueError):
+                continue
+        return sorted(out)
 
     def reset(self) -> None:
         self.state = SEARCH
@@ -97,6 +128,7 @@ class Planner:
         self.avoid_retries = 0
         self.explore_started: float | None = None
         self.explore_forward = 0
+        self.was_at_line = False           # last decision: centered and inside the approach zone
 
     # ------------------------------------------------------------------ helpers
     def _move(self, kind: str, ms: int, reason: str, pwm: int | None = None) -> Action:
@@ -118,15 +150,52 @@ class Planner:
         elif state == EXPLORE:
             self.explore_forward = 0
 
+    def _camera_arrival(self) -> bool:
+        return self.s.arrival_mode != "ultrasonic" or not self.use_distance
+
+    @staticmethod
+    def _bottom(det) -> float | None:
+        bottom = getattr(det, "bottom_y", None)
+        if bottom is None and det is not None and det.bbox and det.frame_height:
+            bottom = (det.bbox[1] + det.bbox[3]) / det.frame_height
+        return bottom
+
+    def _in_zone(self, det) -> bool:
+        bottom = self._bottom(det)
+        return bool(self.stop_line_y is not None and bottom is not None
+                    and bottom >= self.stop_line_y - self.s.approach_zone_y)
+
     def _target_close(self, det) -> bool:
-        return bool(det is not None and det.detected and det.area_ratio is not None
-                    and det.area_ratio >= self.s.arrive_area_ratio
-                    and abs(det.horizontal_error) <= self.s.aim_deadband * 2)
+        """Target centered and close: ultrasonic reactions are ignored (it may be the block or the wall behind it)."""
+        if det is None or not det.detected or abs(det.horizontal_error) > self.s.aim_deadband * 2:
+            return False
+        if self.stop_line_y is not None:
+            return self._in_zone(det)
+        return det.area_ratio is not None and det.area_ratio >= self.s.arrive_area_ratio
 
     def _aim_ms(self, err: float) -> int:
+        if self.turn_table and self.s.camera_hfov_deg > 0:
+            needed = abs(err) * self.s.camera_hfov_deg / 2.0
+            fitting = [ms for ms, deg in self.turn_table if deg <= needed]
+            return fitting[-1] if fitting else self.turn_table[0][0]
         span = max(1e-6, 1.0 - self.s.aim_deadband)
         frac = min(1.0, max(0.0, (abs(err) - self.s.aim_deadband) / span))
         return int(round(self.s.turn_min_ms + frac * (self.s.turn_max_ms - self.s.turn_min_ms)))
+
+    def _forward_step(self, det) -> tuple:
+        """(duration_ms, note) for one forward step toward the target."""
+        dist = getattr(det, "distance_cm_est", None)
+        if self.forward_table and dist is not None:
+            if self._in_zone(det):
+                return self.forward_table[0][0], " Inside the approach zone: smallest step."
+            remaining = max(0.0, dist - self.s.arrive_distance_cm)
+            fitting = [ms for ms, cm in self.forward_table if cm <= 0.7 * remaining]
+            ms = fitting[-1] if fitting else self.forward_table[0][0]
+            return ms, f" About {remaining:.0f} cm to go."
+        if self._in_zone(det):
+            return self.s.slow_forward_ms, " Inside the approach zone: short step."
+        slow = det.area_ratio is not None and det.area_ratio >= self.s.slow_area_ratio
+        return (self.s.slow_forward_ms, " Slowing down.") if slow else (self.s.forward_ms, "")
 
     # ------------------------------------------------------------------ main
     def decide(self, det, free, distance_cm: float | None = None,
@@ -134,7 +203,7 @@ class Planner:
         now = time.monotonic() if now is None else now
         if self.state == ARRIVED:
             return self._action(STOP, "Arrived. Waiting for Mission Control confirmation.")
-        if self.state == GIVE_UP:
+        if self.state == GIVE_UP and not (det is not None and det.detected):
             return self._action(STOP, "Explored too long without finding the target. Ask the pilot.")
         if not camera_ok:
             return self._action(STOP, "Camera frame is stale. Waiting for fresh video.")
@@ -147,7 +216,7 @@ class Planner:
         if det is not None and det.detected:
             self.last_error = det.horizontal_error
             self.lost = 0
-            if self.state in (SEARCH, EXPLORE):
+            if self.state in (SEARCH, EXPLORE, GIVE_UP):
                 self._enter(APPROACH)
         else:
             self.lost += 1
@@ -163,6 +232,10 @@ class Planner:
     # ------------------------------------------------------------------ states
     def _approach(self, det, free, distance_cm, expecting_distance) -> Action:
         if det is None or not det.detected:
+            if self.was_at_line and self._camera_arrival():
+                self._enter(ARRIVED)
+                return self._action(ARRIVED_ACTION, "Target left the bottom of the view while centered at the stop line.")
+            self.was_at_line = False
             if self.lost >= self.s.lost_decisions:
                 self._enter(SEARCH)
                 return self._search(free, time.monotonic())
@@ -170,8 +243,20 @@ class Planner:
         err = det.horizontal_error
         centered = abs(err) <= self.s.aim_deadband
         large = det.area_ratio is not None and det.area_ratio >= self.s.arrive_area_ratio
+        self.was_at_line = centered and self._in_zone(det)
 
-        if centered and large:
+        if self._camera_arrival():
+            bottom = self._bottom(det)
+            if self.stop_line_y is not None:
+                if centered and bottom is not None and bottom >= self.stop_line_y:
+                    self._enter(ARRIVED)
+                    est = getattr(det, "distance_cm_est", None)
+                    where = f" (about {est:.0f} cm)" if est is not None else ""
+                    return self._action(ARRIVED_ACTION, f"Bottom edge reached the stop line{where}.")
+            elif centered and large:
+                self._enter(ARRIVED)
+                return self._action(ARRIVED_ACTION, "Target centered and large (stop line not calibrated; size only).")
+        elif centered and large:
             if not self.use_distance:
                 self._enter(ARRIVED)
                 return self._action(ARRIVED_ACTION, "Target centered and large (vision only; ultrasonic not checked).")
@@ -192,14 +277,14 @@ class Planner:
             kind = TURN_LEFT if err < 0 else TURN_RIGHT
             return self._move(kind, self._aim_ms(err), f"Aim at target (error {err:+.2f}).")
 
-        if self.use_distance and self.forward_since_check >= self.s.distance_check_every and not expecting_distance:
+        if (self.use_distance and self.forward_since_check >= self.s.distance_check_every
+                and not expecting_distance and not self._target_close(det)):
             self.forward_since_check = 0
             self.awaiting_distance = True
-            return self._action(READ_DISTANCE, "Periodic ultrasonic safety check.")
+            return self._action(READ_DISTANCE, "Periodic ultrasonic safety check (walls).")
         self.forward_since_check += 1
-        slow = det.area_ratio is not None and det.area_ratio >= self.s.slow_area_ratio
-        return self._move(FORWARD, self.s.slow_forward_ms if slow else self.s.forward_ms,
-                          "Target centered; path clear." + (" Slowing down." if slow else ""))
+        ms, note = self._forward_step(det)
+        return self._move(FORWARD, ms, "Target centered; path clear." + note)
 
     def _start_avoid(self, free, reason: str, backoff: bool = False) -> Action:
         left, right = free.side_space() if free is not None else (0.0, 0.0)
@@ -253,9 +338,10 @@ class Planner:
             return self._move(BACKWARD, self.s.backoff_ms, "No open floor in view. Backing off.")
         if not free.center_blocked:
             self.explore_forward += 1
+            action = self._move(FORWARD, self.s.forward_ms, "Exploring toward open floor.")
             if self.explore_forward >= self.s.explore_steps:
                 self._enter(SEARCH)
-            return self._move(FORWARD, self.s.forward_ms, "Exploring toward open floor.")
+            return action
         bearing = free.bearings[free.best_strip]
         kind = TURN_LEFT if bearing < 0 else TURN_RIGHT
         ms = self.s.turn_min_ms + abs(bearing) * (self.s.avoid_turn_ms - self.s.turn_min_ms)

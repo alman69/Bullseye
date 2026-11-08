@@ -78,7 +78,8 @@ class FreeSpace:
 
 
 def analyze_floor(frame_bgr: np.ndarray, settings: FloorSettings | None = None,
-                  exclude_mask: np.ndarray | None = None) -> FreeSpace:
+                  exclude_mask: np.ndarray | None = None, floor_mask: np.ndarray | None = None) -> FreeSpace:
+    """`floor_mask` (full-frame 0/255, e.g. the classifier's "floor" class) replaces the HSV floor test."""
     s = settings or FloorSettings()
     h, w = frame_bgr.shape[:2]
     top = min(h - 1, max(0, int(h * s.roi_top)))
@@ -87,8 +88,11 @@ def analyze_floor(frame_bgr: np.ndarray, settings: FloorSettings | None = None,
     work_h = max(1, int(round(roi.shape[0] * work_w / w)))
     small = cv2.resize(roi, (work_w, work_h), interpolation=cv2.INTER_AREA)
 
-    hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
-    floor = cv2.inRange(hsv, (0, 0, s.v_min), (179, s.s_max, 255))
+    if floor_mask is not None:
+        floor = cv2.resize(floor_mask[top:, :], (work_w, work_h), interpolation=cv2.INTER_NEAREST)
+    else:
+        hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+        floor = cv2.inRange(hsv, (0, 0, s.v_min), (179, s.s_max, 255))
     if s.morph_kernel and s.morph_kernel > 1:
         k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (s.morph_kernel, s.morph_kernel))
         floor = cv2.morphologyEx(floor, cv2.MORPH_OPEN, k)

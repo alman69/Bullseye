@@ -16,6 +16,15 @@ A color region that passes is only a *candidate*; it is not proof that it is a r
 
 Best-candidate rule: the LARGEST passing contour (by contour area).
 
+Two mask sources:
+  * "hsv": fixed HSV range per color (config "colors"), the original method.
+  * "classifier": per-pixel material classifier learned from samples
+    (colorclass.py, color_model.json), after floor-referenced white balance.
+    Colors the model doesn't know fall back to their HSV range.
+When the ground is calibrated (ground.py), candidates whose bottom edge is above
+the horizon or whose width doesn't fit a block at that distance are rejected,
+and the result carries `bottom_y` and `distance_cm_est`.
+
 `area` and `area_ratio` are image measurements only. They grow as the rover
 approaches a target and can drive a relative "getting closer" behavior, but
 they are NOT a physical distance: rock size, angle and partial occlusion all
@@ -24,12 +33,15 @@ change them. Proximity must be confirmed by the ultrasonic sensor.
 from __future__ import annotations
 
 import time
+from collections import namedtuple
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 COLORS = ("red", "yellow", "green", "blue")
+Prepared = namedtuple("Prepared", "corrected labels")   # white-balanced frame + class-index image
 LEFT, CENTER, RIGHT, NONE = "LEFT", "CENTER", "RIGHT", "NONE"
 
 
@@ -62,6 +74,8 @@ class Candidate:
     center: tuple        # (cx, cy) contour centroid in pixels
     area: float          # contour area in pixels
     extent: float        # contour area / bbox area
+    bottom_y: float = 0.0             # bbox bottom / frame height
+    distance_cm: float | None = None  # from the ground calibration
 
 
 @dataclass
@@ -81,6 +95,8 @@ class Detection:
     frame_id: int | None = None
     timestamp: float | None = None          # time.time() when the frame was received
     processing_ms: float = 0.0              # detect() run time
+    bottom_y: float | None = None           # bbox bottom / frame height (lower = closer)
+    distance_cm_est: float | None = None    # from the bottom edge (ground calibration); camera estimate only
     all_candidates: list = field(default_factory=list, repr=False)  # for drawing; not in to_dict()
 
     def to_dict(self) -> dict:
@@ -100,6 +116,8 @@ class Detection:
             "frame_id": self.frame_id,
             "timestamp": self.timestamp,
             "processing_ms": round(self.processing_ms, 2),
+            "bottom_y": None if self.bottom_y is None else round(self.bottom_y, 4),
+            "distance_cm_est": None if self.distance_cm_est is None else round(self.distance_cm_est, 1),
         }
 
 
@@ -124,15 +142,65 @@ def direction_for(error: float, deadband: float) -> str:
 
 
 class ColorDetector:
-    def __init__(self, ranges: dict, settings: DetectorSettings | None = None):
+    def __init__(self, ranges: dict, settings: DetectorSettings | None = None,
+                 model=None, white_balance=None, ground=None):
         self.ranges = {name: (r if isinstance(r, HsvRange) else HsvRange.from_dict(r)) for name, r in ranges.items()}
         self.settings = settings or DetectorSettings()
         k = self.settings.morph_kernel
         self._kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)) if k and k > 1 else None
+        self.model = model                  # colorclass.ColorModel or None (HSV mode)
+        self.wb = white_balance             # colorclass.WhiteBalance or None
+        self.ground = ground                # ground.GroundModel or None
 
     @classmethod
-    def from_config(cls, cfg: dict) -> "ColorDetector":
-        return cls(cfg["colors"], DetectorSettings.from_dict(cfg["detector"]))
+    def from_config(cls, cfg: dict, base_dir=None, mode: str | None = None) -> "ColorDetector":
+        from colorclass import ColorModel
+        from ground import GroundModel
+        cc = cfg.get("classifier", {})
+        mode = mode or cc.get("mode", "auto")
+        base = Path(base_dir) if base_dir else Path(__file__).parent
+        model_path = base / cc.get("model_path", "color_model.json")
+        model = None
+        if mode == "classifier" or (mode == "auto" and model_path.exists()):
+            if not model_path.exists():
+                raise FileNotFoundError(f"{model_path} not found: sample colors first (main.py, key k)")
+            model = ColorModel.load(model_path)
+        ground = GroundModel.from_dict(cfg.get("ground"))
+        det = cls(cfg["colors"], DetectorSettings.from_dict(cfg["detector"]),
+                  ground=ground if ground.calibrated else None)
+        det.set_model(model, cc)
+        return det
+
+    def set_model(self, model, cc: dict | None = None) -> None:
+        from colorclass import WhiteBalance
+        cc = cc or {}
+        self.model = model
+        self.wb = None
+        if model is not None and model.reference_floor is not None and cc.get("white_balance", True):
+            self.wb = WhiteBalance(model.reference_floor, cc.get("wb_alpha", 0.2), cc.get("wb_min_floor", 0.02),
+                                   cc.get("wb_gain_min", 0.6), cc.get("wb_gain_max", 1.6))
+
+    @property
+    def mode(self) -> str:
+        return "classifier" if self.model is not None else "hsv"
+
+    def prepare(self, frame_bgr: np.ndarray):
+        """Classifier mode: blur, white-balance and label every pixel once per frame. HSV mode: None."""
+        if self.model is None:
+            return None
+        k = self.settings.blur_kernel
+        img = cv2.GaussianBlur(frame_bgr, (k, k), 0) if k and k > 1 else frame_bgr
+        if self.wb is not None:
+            self.wb.update(img)
+            img = self.wb.apply(img)
+        return Prepared(img, self.model.labels(img))
+
+    def class_mask(self, prepared, name: str):
+        """0/255 mask of a model class (e.g. "floor"), or None if the model doesn't have it."""
+        if prepared is None or self.model is None:
+            return None
+        idx = self.model.index(name)
+        return None if idx is None else (prepared.labels == idx).astype(np.uint8) * 255
 
     @property
     def colors(self) -> tuple:
@@ -147,8 +215,16 @@ class ColorDetector:
             frame_bgr = cv2.GaussianBlur(frame_bgr, (k, k), 0)
         return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
 
-    def mask(self, frame_bgr: np.ndarray, color: str, hsv: np.ndarray | None = None) -> np.ndarray:
+    def mask(self, frame_bgr: np.ndarray, color: str, hsv: np.ndarray | None = None,
+             prepared=None) -> np.ndarray:
         """Binary (0/255) mask of `color` after noise cleanup."""
+        if self.model is not None and self.model.index(color) is not None:
+            prepared = prepared if prepared is not None else self.prepare(frame_bgr)
+            m = self.class_mask(prepared, color)
+            if self._kernel is not None:
+                m = cv2.morphologyEx(m, cv2.MORPH_OPEN, self._kernel)
+                m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, self._kernel)
+            return m
         rng = self._range(color)
         hsv = self.to_hsv(frame_bgr) if hsv is None else hsv
         lo_sv = (rng.s[0], rng.v[0])
@@ -178,20 +254,28 @@ class ColorDetector:
             extent = area / float(bw * bh)
             if extent < s.min_extent:
                 continue
+            bottom = (y + bh) / float(h)
+            distance = None
+            if self.ground is not None:
+                if not self.ground.plausible(bottom, bw / float(w)):
+                    continue                     # above the horizon or wrong size for a block there
+                distance = self.ground.distance_cm(bottom)
             m = cv2.moments(c)
             if m["m00"] > 0:
                 center = (int(round(m["m10"] / m["m00"])), int(round(m["m01"] / m["m00"])))
             else:
                 center = (x + bw // 2, y + bh // 2)
-            out.append(Candidate((x, y, bw, bh), center, area, extent))
+            out.append(Candidate((x, y, bw, bh), center, area, extent, bottom, distance))
         out.sort(key=lambda cand: cand.area, reverse=True)
         return out
 
     def detect(self, frame_bgr: np.ndarray, target_color: str,
-               frame_id: int | None = None, timestamp: float | None = None) -> Detection:
+               frame_id: int | None = None, timestamp: float | None = None, prepared=None) -> Detection:
         t0 = time.perf_counter()
         h, w = frame_bgr.shape[:2]
-        cands = self.candidates(self.mask(frame_bgr, target_color))
+        if prepared is None and self.model is not None:
+            prepared = self.prepare(frame_bgr)
+        cands = self.candidates(self.mask(frame_bgr, target_color, prepared=prepared))
         det = Detection(target_color, False, w, h, frame_id=frame_id, timestamp=timestamp,
                         candidates=len(cands), all_candidates=cands)
         if cands:
@@ -205,10 +289,14 @@ class ColorDetector:
             det.area_ratio = best.area / float(w * h)
             det.bbox = list(best.bbox)
             det.direction = direction_for(err, self.settings.center_deadband)
+            det.bottom_y = best.bottom_y
+            det.distance_cm_est = best.distance_cm
         det.processing_ms = (time.perf_counter() - t0) * 1000.0
         return det
 
     def _range(self, color: str) -> HsvRange:
+        if color not in self.ranges and self.model is not None:
+            raise ValueError(f"unknown color {color!r}; model classes: {', '.join(self.model.classes)}")
         try:
             return self.ranges[color]
         except KeyError:
