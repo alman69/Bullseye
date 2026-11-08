@@ -55,3 +55,15 @@ it("explains an unclaimed pilot seat and an outdated server", () => {
   expect(screen.getByText(/Claim controls in the Pilot seat panel/)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Connect" }).hasAttribute("disabled")).toBe(true);
 });
+
+it("keeps BLE connected while disabling motion for an actual servo fault", () => {
+  const onAction = vi.fn();
+  render(<ScooperPanel scooper={{ ...ready, transport: "ble", address: "BLE · Bullseye-Display", ble_connected: true, servo_ready: false, display_updates: 8, error: "Servo PWM unavailable; motion disabled" }} canUse onAction={onAction} />);
+  expect(screen.getByText("BLE connected · scooper PWM unavailable")).toBeTruthy();
+  expect(screen.getByText(/BLE connected. 8 display updates acknowledged/)).toBeTruthy();
+  for (const name of ["Squeeze", "Release", "Straight down"])
+    expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Squeeze" }));
+  expect(onAction).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Reconnect" }).hasAttribute("disabled")).toBe(false);
+});

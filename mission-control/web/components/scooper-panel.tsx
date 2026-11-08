@@ -23,6 +23,7 @@ function describe(scooper?: ScooperState) {
   if (!scooper.available) return "Scooper link unavailable";
   if (scooper.status === "connecting") return scooper.transport === "ble" ? "Connecting display + scooper over BLE…" : "Connecting over Wi-Fi…";
   if (scooper.status !== "ready") return scooper.status === "error" ? "Connection failed" : "Not connected";
+  if (scooper.servo_ready === false) return "BLE connected · scooper PWM unavailable";
   if (scooper.state === "sequence") return `${scooper.sequence === "release" ? "Releasing" : "Squeezing"} · ${scooper.step ?? ""}`;
   if (scooper.state === "relaxed") return "Relaxed (servos limp)";
   const left = scooper.angles.left ?? DOWN;
@@ -34,7 +35,7 @@ export function ScooperPanel({ scooper, canUse, onAction }: Props) {
   const ready = scooper?.status === "ready";
   const busy = !!scooper?.busy || scooper?.status === "connecting";
   const moving = scooper?.state === "sequence";
-  const canMove = canUse && ready && !busy && !moving;
+  const canMove = canUse && ready && scooper?.servo_ready !== false && !busy && !moving;
   const left = stickEnd(-1, scooper?.angles.left ?? DOWN);
   const right = stickEnd(1, scooper?.angles.right ?? DOWN);
   return <section className="panel bench-scooper" aria-label="Ore scooper">
@@ -58,7 +59,7 @@ export function ScooperPanel({ scooper, canUse, onAction }: Props) {
       </div>
       {scooper?.error && <p className="bench-inline-error" role="status">{scooper.error}</p>}
       {!canUse && <p className="bench-help">Claim controls in the Pilot seat panel to connect. Rover driving can stay disabled.</p>}
-      {ble && <p className="bench-help">One BLE connection powers the display updates and scooper controls. Stop the separate send-display.sh sender before connecting here. {ready ? `${scooper?.display_updates ?? 0} display updates acknowledged.` : "Claim controls, then Connect."}</p>}
+      {ble && <p className="bench-help">One BLE connection powers the display updates and scooper controls. Stop the separate send-display.sh sender before connecting here. {ready ? `BLE connected. ${scooper?.display_updates ?? 0} display updates acknowledged.` : "Claim controls, then Connect."}</p>}
       <p className="bench-help">Squeeze: out 30°, then in 80° past straight down to lift the block. STOP holds the last commanded angles. {ble ? "Rover Wi-Fi is unchanged." : "Legacy standalone scooper uses the rover Wi-Fi."}</p>
     </div>
   </section>;

@@ -74,11 +74,11 @@ class ScooperLink:
             self.client = httpx.AsyncClient(base_url=self.url, timeout=REQUEST_TIMEOUT_S, transport=self.transport, trust_env=False)
         return self.client
 
-    def _apply(self, status):
+    def _apply(self, status, *, allow_servo_fault=False):
         """Copy a firmware status object in; returns True if anything changed."""
         if not isinstance(status, dict) or status.get("state") not in {"relaxed", "holding", "moving", "sequence"}:
             raise ValueError("The scooper sent a status without a state.")
-        if status.get("servo_ready") is False:
+        if status.get("servo_ready") is False and not allow_servo_fault:
             raise ValueError("Scooper servo PWM initialization failed; inspect GPIO41/42 and restart the S3.")
         boot, sequence = status.get("boot_id"), status.get("command_seq")
         if status.get("api") == 2 or self.boot_id is not None:

@@ -10,7 +10,8 @@ DISPLAY = FIRMWARE / "esp32-display/bullseye_display"
 SCOOPER = FIRMWARE / "esp32-scooper/bullseye_scooper"
 OUTPUT = HERE / "bullseye_companion/bullseye_companion.ino"
 PARTS = [*(DISPLAY / name for name in ("PixelFace.h", "DisplayProtocol.h", "DisplayJson.h", "DisplayRenderer.h", "TouchInput.h", "DisplayInput.h")),
-         *(SCOOPER / name for name in ("ScooperConfig.h", "Scooper.h", "ServoOutput.h")),
+         *(SCOOPER / name for name in ("ScooperConfig.h", "Scooper.h")),
+         HERE / "ServoPwm.h", HERE / "ArduinoServoPwm.h",
          HERE / "CompanionHttp.h", HERE / "CompanionControl.h", HERE / "CompanionBle.h", HERE / "CompanionRuntime.h"]
 
 

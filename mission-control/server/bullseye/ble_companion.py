@@ -19,6 +19,7 @@ RESULTS = {2: "Invalid BLE command", 3: "Outdated command; reconnect", 4: "Scoop
 HEARTBEAT_S = .5
 STATUS_TIMEOUT_S = 2.0
 COMMAND_TIMEOUT_S = 1.0
+PWM_FAULT = "BLE display connected; scooper PWM unavailable. Motion is disabled. Check the S3 startup log for the PWM attach/write error."
 
 
 def encode_command(name, boot, sequence):
@@ -60,14 +61,17 @@ class BleCompanionLink(ScooperLink):
         self.failure = None
         self.last_status_at = 0
         self.display_updates = 0
+        self.servo_ready = None
 
     def snapshot(self):
-        return {**super().snapshot(), "transport": "ble", "display_updates": self.display_updates}
+        return {**super().snapshot(), "transport": "ble", "display_updates": self.display_updates,
+                "ble_connected": self.client is not None and self.client.is_connected, "servo_ready": self.servo_ready}
 
     async def connect(self):
         await self.close()
         self.status, self.error, self.failure = "connecting", None, None
         self.display_updates = 0
+        self.servo_ready = None
         self.on_change()
         ready = asyncio.get_running_loop().create_future()
         self.worker = asyncio.create_task(self._run(ready))
@@ -98,7 +102,12 @@ class BleCompanionLink(ScooperLink):
             return
         try:
             result, reply, status = decode_status(data)
-            self._apply(status)
+            self._apply(status, allow_servo_fault=True)
+            self.servo_ready = status["servo_ready"]
+            if not self.servo_ready:
+                self.error = PWM_FAULT
+            elif self.error == PWM_FAULT:
+                self.error = None
             self.last_status_at = time.monotonic()
             if self.pending and not self.pending[1].done() and (reply == self.pending[0] or reply == 0 and result >= 2):
                 self.pending[1].set_result(True if result == 1 else RESULTS.get(result, "Missing command acknowledgement"))
@@ -182,6 +191,11 @@ class BleCompanionLink(ScooperLink):
             raise ValueError(name)
         if not self.ready and not (name == "stop" and self.client is not None):
             raise ConnectionError("Connect the companion over BLE first")
+        if name in {"squeeze", "release", "home"} and self.servo_ready is not True:
+            # Keep the BLE display session alive, but never send a positive move.
+            self.error = PWM_FAULT
+            self.on_change()
+            return PWM_FAULT
         if self.pending is not None or name != "stop" and self.stop_task and not self.stop_task.done():
             raise ConnectionError("Companion command or STOP still in progress")
         self.command_sequence += 1
@@ -195,7 +209,7 @@ class BleCompanionLink(ScooperLink):
             result = await asyncio.wait_for(future, COMMAND_TIMEOUT_S)
             if generation != self.generation and name != "stop":
                 return "canceled by STOP"
-            self.error = None if result is True else result
+            self.error = (None if self.servo_ready else PWM_FAULT) if result is True else result
             return result
         except asyncio.CancelledError:
             raise

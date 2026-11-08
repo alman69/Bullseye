@@ -68,7 +68,7 @@ class Peripheral:
         if opcode:
             self.seq = seq
         if opcode in {3, 4}:
-            self.flags, self.step = 5, 0
+            self.flags, self.step = (self.flags & 3) | (4 if self.flags & 1 else 0), 0
         elif opcode == 1:
             self.flags, self.step = 13, 1
         elif opcode == 2:
@@ -155,6 +155,44 @@ async def test_cached_outage_is_unavailable_not_replayed():
         await until(lambda: bool(runtime.peripheral.telemetry))
         packet = runtime.peripheral.telemetry[0]
         assert packet["status"] == "unavailable" and packet["distance_cm"] is None
+    finally:
+        await link.close()
+
+
+async def test_pwm_failure_keeps_ble_telemetry_connected_but_never_sends_motion():
+    runtime = Runtime()
+    runtime.peripheral.flags = 0  # Real BLE status, failed/relaxed servo output.
+    link = BleCompanionLink(state, runtime_factory=lambda: runtime)
+    try:
+        await link.connect()
+        await until(lambda: link.display_updates > 0)
+        snapshot = link.snapshot()
+        assert link.ready and snapshot["ble_connected"] and snapshot["servo_ready"] is False
+        assert "BLE display connected" in link.error and "PWM" in link.error
+        before = len(runtime.peripheral.commands)
+        for name in ("squeeze", "release", "home"):
+            assert "Motion is disabled" in await link.command(name)
+        assert len(runtime.peripheral.commands) == before
+        assert await link.command("stop") is True  # STOP remains available.
+        assert runtime.peripheral.is_connected
+    finally:
+        await link.close()
+
+
+async def test_runtime_pwm_fault_disables_actions_without_losing_the_display():
+    runtime = Runtime()
+    link = BleCompanionLink(state, runtime_factory=lambda: runtime)
+    try:
+        await link.connect()
+        await until(lambda: link.display_updates > 0)
+        runtime.peripheral.flags = 0
+        runtime.peripheral.notify()
+        await until(lambda: link.servo_ready is False)
+        assert link.ready and link.snapshot()["ble_connected"]
+        before = len(runtime.peripheral.commands)
+        assert "PWM unavailable" in await link.command("squeeze")
+        assert len(runtime.peripheral.commands) == before
+        assert runtime.connections == 1
     finally:
         await link.close()
 

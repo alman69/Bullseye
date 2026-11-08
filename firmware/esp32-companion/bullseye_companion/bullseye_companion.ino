@@ -916,47 +916,95 @@ class Scooper {
 }  // namespace scooper
 
 
-// ===== esp32-scooper/bullseye_scooper/ServoOutput.h =====
+// ===== esp32-companion/ServoPwm.h =====
 
-// 50 Hz hobby-servo PWM on the ESP32 LEDC peripheral, using the Espressif Arduino
-// core 3.x pin-based API (ledcAttach/ledcWrite/ledcDetach). No ESP32Servo library.
+#include <cmath>
+
+namespace companion {
+enum class PwmFault : uint8_t { None, Attach, Write, Detach, Argument };
+inline const char* pwmFaultName(PwmFault fault) {
+  switch (fault) {
+    case PwmFault::Attach: return "attach";
+    case PwmFault::Write: return "write";
+    case PwmFault::Detach: return "detach";
+    case PwmFault::Argument: return "invalid argument";
+    default: return "none";
+  }
+}
+
+// Actual HAL return values establish readiness, not an immediate duty/frequency
+// readback. LEDC applies a new duty at the next PWM cycle (20 ms at 50 Hz).
+// Used by the uploadable sketch and regression checks with delayed-readback HAL.
+template<class Hal> class ServoPwm {
+ public:
+  static constexpr uint8_t kBits = 14;
+  explicit ServoPwm(Hal& hal) : hal_(hal) {}
+  void attach(uint8_t joint) {
+    if (!valid(joint) || !healthy() || on_[joint]) return;
+    if (!hal_.attach(scooper::kJoints[joint].pin, scooper::kServoHz, kBits)) { fail(PwmFault::Attach, joint); return; }
+    on_[joint] = true; written_[joint] = false;
+  }
+  void write(uint8_t joint, float degrees) {
+    if (!valid(joint) || !healthy()) return;
+    if (!on_[joint] || !std::isfinite(degrees)) { fail(PwmFault::Argument, joint); return; }
+    if (degrees < 0) degrees = 0;
+    if (degrees > 180) degrees = 180;
+    const float us = scooper::kPulseMinUs + (scooper::kPulseMaxUs - scooper::kPulseMinUs) * degrees / 180.0f;
+    const uint32_t duty = static_cast<uint32_t>(us * (1UL << kBits) * scooper::kServoHz / 1000000.0f + 0.5f);
+    if (!hal_.write(scooper::kJoints[joint].pin, duty)) { fail(PwmFault::Write, joint); return; }
+    written_[joint] = true;
+  }
+  void detach(uint8_t joint) {
+    if (!valid(joint) || !on_[joint]) return;
+    if (!hal_.detach(scooper::kJoints[joint].pin)) { fail(PwmFault::Detach, joint); return; }
+    on_[joint] = written_[joint] = false;
+    hal_.low(scooper::kJoints[joint].pin);
+  }
+  bool healthy() const { return fault_ == PwmFault::None; }
+  bool initialized() const {
+    if (!healthy()) return false;
+    for (uint8_t i = 0; i < scooper::kJointCount; ++i) if (!on_[i] || !written_[i]) return false;
+    return true;
+  }
+  PwmFault fault() const { return fault_; }
+  uint8_t faultJoint() const { return faultJoint_; }
+ private:
+  bool valid(uint8_t joint) { if (joint < scooper::kJointCount) return true; fail(PwmFault::Argument, joint); return false; }
+  void fail(PwmFault fault, uint8_t joint) {
+    if (healthy()) { fault_ = fault; faultJoint_ = joint; hal_.error(pwmFaultName(fault), joint); }
+    // Roll back both outputs on an actual HAL error. Reconnect never rearms a
+    // failed PWM output; recovery requires reset and fresh initialization.
+    for (uint8_t i = 0; i < scooper::kJointCount; ++i) {
+      if (!on_[i]) continue;
+      hal_.detach(scooper::kJoints[i].pin); hal_.low(scooper::kJoints[i].pin);
+      on_[i] = written_[i] = false;
+    }
+  }
+  Hal& hal_;
+  PwmFault fault_ = PwmFault::None;
+  uint8_t faultJoint_ = 255;
+  bool on_[scooper::kJointCount] = {}, written_[scooper::kJointCount] = {};
+};
+}  // namespace companion
+
+
+// ===== esp32-companion/ArduinoServoPwm.h =====
+
 #include <Arduino.h>
 
-namespace scooper {
-
-class LedcServos {
+namespace companion {
+class ArduinoServoPwm {
  public:
-  static constexpr uint8_t kBits = 14;  // 20 ms period / 16384 counts = ~1.2 us per count.
-
-  void attach(uint8_t joint) {
-    if (on_[joint]) return;
-    on_[joint] = ledcAttach(kJoints[joint].pin, kServoHz, kBits);
-    if (!on_[joint]) Serial.printf("PWM attach failed on GPIO%u\n", kJoints[joint].pin);
+  bool attach(uint8_t pin, uint32_t hz, uint8_t bits) { return ledcAttach(pin, hz, bits); }
+  bool write(uint8_t pin, uint32_t duty) { return ledcWrite(pin, duty); }
+  bool detach(uint8_t pin) { return ledcDetach(pin); }
+  void low(uint8_t pin) { pinMode(pin, OUTPUT); digitalWrite(pin, LOW); }
+  void error(const char* stage, uint8_t joint) {
+    if (joint < scooper::kJointCount) Serial.printf("Servo PWM %s failed: %s GPIO%u. Both outputs disabled.\n", stage, scooper::kJoints[joint].name, scooper::kJoints[joint].pin);
+    else Serial.printf("Servo PWM %s failed: invalid joint %u. Both outputs disabled.\n", stage, joint);
   }
-
-  void write(uint8_t joint, float deg) {
-    if (!on_[joint]) return;
-    if (deg < 0) deg = 0;
-    if (deg > 180) deg = 180;
-    const float us = kPulseMinUs + (kPulseMaxUs - kPulseMinUs) * deg / 180.0f;
-    const uint32_t duty = static_cast<uint32_t>(us * (1UL << kBits) * kServoHz / 1000000.0f + 0.5f);
-    ledcWrite(kJoints[joint].pin, duty);
-  }
-
-  // Drive the line low afterwards so a floating pin cannot twitch the servo.
-  void detach(uint8_t joint) {
-    if (!on_[joint]) return;
-    ledcDetach(kJoints[joint].pin);
-    pinMode(kJoints[joint].pin, OUTPUT);
-    digitalWrite(kJoints[joint].pin, LOW);
-    on_[joint] = false;
-  }
-
- private:
-  bool on_[kJointCount] = {};
 };
-
-}  // namespace scooper
+}  // namespace companion
 
 
 // ===== esp32-companion/CompanionHttp.h =====
@@ -1245,11 +1293,11 @@ template<class Out> void encodeStatus(uint8_t* out, const Control<Out>& control,
 namespace companion {
 class Runtime {
  public:
-  Runtime() : control_(servos_) {}
+  Runtime() : servos_(pwm_), control_(servos_) {}
   CommandMailbox mailbox;
   void begin() {
     bool output = control_.begin(millis(), esp_random());
-    for (uint8_t i = 0; i < scooper::kJointCount; ++i) output &= ledcReadFreq(scooper::kJoints[i].pin) > 0;
+    output &= servos_.initialized();
     control_.outputReady(output);
     if (!output) Serial.println("Scooper PWM failed; motion disabled until restart.");
     Serial.println("Combined BLE display + scooper ready. Serial: status, stop, relax, home, squeeze, release, set 1|2 degrees [speed].");
@@ -1259,10 +1307,21 @@ class Runtime {
   // Main loop only. Epoch fencing handles a disconnect/reconnect between ticks.
   void link(bool connected, uint32_t epoch, uint32_t now) {
     if (epoch != epoch_) { control_.connectionLost(); epoch_ = epoch; }
-    connected_ = connected; control_.tick(now, connected);
+    connected_ = connected; updateMotion(now);
   }
-  void updateMotion(uint32_t now) { control_.tick(now, connected_); }
-  Result execute(const CommandFrame& frame, uint32_t now) { return apply(control_, frame, now); }
+  void updateMotion(uint32_t now) {
+    control_.outputReady(servos_.healthy());
+    control_.tick(now, connected_);
+    control_.outputReady(servos_.healthy());
+  }
+  Result execute(const CommandFrame& frame, uint32_t now) {
+    control_.outputReady(servos_.healthy());
+    const Result result = apply(control_, frame, now);
+    control_.outputReady(servos_.healthy());
+    const Command command = decodeCommand(frame).command;
+    if (result == Result::Applied && !control_.servoReady() && command != Command::Status && command != Command::Stop) return Result::Refused;
+    return result;
+  }
   void status(uint8_t* out, Result result = Result::Status, uint32_t reply = 0) const { encodeStatus(out, control_, result, reply); }
  private:
   void printStatus() const {
@@ -1302,8 +1361,9 @@ class Runtime {
       else if (!lineOverflow_) { if (!lineLength_) lineStarted_ = now; line_[lineLength_++] = c; }
     }
   }
-  scooper::LedcServos servos_;
-  Control<scooper::LedcServos> control_;
+  ArduinoServoPwm pwm_;
+  ServoPwm<ArduinoServoPwm> servos_;
+  Control<ServoPwm<ArduinoServoPwm>> control_;
   char line_[64] = {};
   size_t lineLength_ = 0;
   uint32_t lineStarted_ = 0, epoch_ = 0;

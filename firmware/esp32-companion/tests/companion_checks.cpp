@@ -5,6 +5,7 @@
 #include "CompanionHttp.h"
 #include "CompanionControl.h"
 #include "CompanionBle.h"
+#include "ServoPwm.h"
 #include "DisplayJson.h"
 #include "DisplayRenderer.h"
 
@@ -52,6 +53,56 @@ struct Servos {
   void detach(uint8_t joint) { assert(joint < 2); attached[joint] = false; }
   void write(uint8_t joint, float value) { assert(joint < 2 && attached[joint] && value >= 0 && value <= 180); angle[joint] = value; }
 };
+// Models the installed LEDC core: a successful write becomes readable only at
+// the next 20 ms cycle. The old immediate ledcReadFreq readiness gate fails here.
+struct DelayedPwm {
+  bool on[43] = {}; uint32_t pending[43] = {}, applied[43] = {};
+  int failAttach = -1, failWrite = -1, failDetach = -1, errors = 0;
+  const char* stage = "";
+  bool attach(uint8_t pin, uint32_t hz, uint8_t bits) {
+    assert((pin == 41 || pin == 42) && hz == 50 && bits == 14);
+    if (pin == failAttach) return false;
+    on[pin] = true; return true;
+  }
+  bool write(uint8_t pin, uint32_t duty) {
+    assert(on[pin] && duty >= 410 && duty <= 1966);
+    if (pin == failWrite) return false;
+    pending[pin] = duty; return true;
+  }
+  bool detach(uint8_t pin) { if (pin == failDetach) return false; on[pin] = false; return true; }
+  void low(uint8_t pin) { on[pin] = false; pending[pin] = applied[pin] = 0; }
+  void error(const char* name, uint8_t) { ++errors; stage = name; }
+  uint32_t readFrequency(uint8_t pin) const { return on[pin] && applied[pin] ? 50 : 0; }
+  void nextCycle() { for (uint8_t pin : {41, 42}) if (on[pin]) applied[pin] = pending[pin]; }
+};
+void pwmChecks() {
+  DelayedPwm hal; ServoPwm<DelayedPwm> output(hal); Control<ServoPwm<DelayedPwm>> control(output);
+  assert(control.begin(0, 42));
+  assert(hal.readFrequency(41) == 0 && hal.readFrequency(42) == 0); // Old code falsely failed startup.
+  control.outputReady(output.initialized());
+  assert(control.servoReady() && output.healthy() && hal.errors == 0);
+  assert(hal.pending[41] == 1188 && hal.pending[42] == 1188);
+  hal.nextCycle(); assert(hal.readFrequency(41) == 50 && hal.readFrequency(42) == 50);
+  assert(control.local(Command::Relax, 20) == nullptr && output.healthy());
+  assert(!hal.on[41] && !hal.on[42] && control.servoReady());
+  assert(control.local(Command::Home, 30) == nullptr && output.initialized());
+  output.write(0, -10); assert(hal.pending[41] == 410);
+  output.write(0, 190); assert(hal.pending[41] == 1966);
+  hal.failWrite = 42; output.write(1, 100);
+  assert(!output.healthy() && output.fault() == PwmFault::Write && output.faultJoint() == 1);
+  assert(!hal.on[41] && !hal.on[42] && !strcmp(hal.stage, "write"));
+  control.outputReady(output.healthy()); assert(!control.servoReady() && control.arm().state() == scooper::State::Relaxed);
+  output.attach(0); assert(!hal.on[41] && hal.errors == 1); // Never silently rearm.
+  DelayedPwm attachHal; attachHal.failAttach = 42;
+  ServoPwm<DelayedPwm> attachFailure(attachHal); Control<ServoPwm<DelayedPwm>> failed(attachFailure);
+  failed.begin(0, 43); failed.outputReady(attachFailure.initialized());
+  assert(!failed.servoReady() && !attachHal.on[41] && !attachHal.on[42] && attachFailure.fault() == PwmFault::Attach);
+  DelayedPwm detachHal; ServoPwm<DelayedPwm> detaching(detachHal);
+  detaching.attach(0); detaching.write(0, 90); detachHal.failDetach = 41; detaching.detach(0);
+  assert(!detaching.healthy() && detaching.fault() == PwmFault::Detach && !detachHal.on[41]);
+  DelayedPwm nanHal; ServoPwm<DelayedPwm> nanOutput(nanHal); nanOutput.attach(0); nanOutput.write(0, NAN);
+  assert(!nanOutput.healthy() && !nanHal.on[41] && nanOutput.fault() == PwmFault::Argument);
+}
 Request request(Command command, uint32_t sequence, uint32_t boot = 42) { return {command, boot, sequence, 0}; }
 CommandFrame bleFrame(uint8_t opcode, uint32_t sequence, uint32_t epoch = 1) {
   CommandFrame frame; frame.epoch = epoch;
@@ -167,6 +218,6 @@ void sharedLoopChecks() {
   assert(telemetry.face.mood(5000) == bullseye::Mood::Curious);
 }
 int main() {
-  httpChecks(); bleChecks(); orderAndTimeoutChecks(); sharedLoopChecks();
-  std::cout << "Combined companion checks passed: BLE commands/status, bounded mailboxes, ordered STOP, watchdog, telemetry, face animation and servo updates.\n";
+  httpChecks(); pwmChecks(); bleChecks(); orderAndTimeoutChecks(); sharedLoopChecks();
+  std::cout << "Combined companion checks passed: delayed PWM readback, HAL faults, BLE commands/status, bounded mailboxes, ordered STOP, watchdog, telemetry, face animation and servo updates.\n";
 }

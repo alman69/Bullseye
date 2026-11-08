@@ -74,6 +74,29 @@ the installed core. No additional Arduino libraries are needed.
    then test the scooper's range with the mechanism clear. Rover driving can
    remain disabled. STOP in the website also requests scooper STOP over BLE.
 
+### PWM readiness and BLE connection status
+
+The earlier combined sketch checked `ledcReadFreq()` immediately after writing
+the first home pulse. In the installed core 3.3.12, that function returns zero
+when the current duty readback is zero. A new duty is not readable until the
+next PWM cycle (20 ms at 50 Hz), so this check could falsely disable working
+outputs at boot. See [Espressif's LEDC duty-readback documentation](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/api-reference/peripherals/ledc.html).
+
+The combined sketch now uses its own tested `ServoPwm.h` / `ArduinoServoPwm.h`
+adapter, checking **both attach and write return values**. It does not rely on
+immediate frequency readback. A real attach/write/detach failure disables both
+outputs, reports the stage and GPIO in the 115200-baud startup/status log, and
+keeps motion disabled until reset. The standalone scooper's original adapter
+is preserved. No physical PWM waveform verification is claimed by these checks.
+
+BLE and servo readiness are separate: a PWM fault now leaves the display's BLE
+connection and telemetry active. The website reports **BLE connected · scooper
+PWM unavailable** and disables all positive motion in both UI and backend.
+STOP remains available. The display's Distance and Link pages should show
+Bluetooth Connected; Rover/Freshness reflect the independent UNO connection
+and cached data. A PWM fault is not a Bluetooth pairing failure. Previously the
+backend closed BLE on that fault, making the display correctly show Disconnected.
+
 **Do not start `send-display.sh` alongside this setup.** It remains available for
 standalone display/demo use, but it occupies the same BLE peripheral. The old
 sender has no scooper control heartbeat and cannot operate the servos.
@@ -163,10 +186,10 @@ Software checks use fake BLE transports and native sanitizer tests. Physical
 upload, BLE permission, combined servo/display operation and range tests remain
 operator-performed; the agent does not flash, open serial or connect live BLE.
 
-Verified November 8, 2026: **159 backend tests**, **55 frontend tests**, native
+Verified November 8, 2026: **161 backend tests**, **56 frontend tests**, native
 sanitizer checks, TypeScript and the production build pass. The combined sketch
-compiles against the installed core/libraries: **678,782 bytes flash (51% of the
-1,310,720-byte app partition)** and **34,380 bytes static RAM (10%; 293,300 bytes
+compiles against the installed core/libraries: **678,950 bytes flash (51% of the
+1,310,720-byte app partition)** and **34,396 bytes static RAM (10%; 293,284 bytes
 remaining)**. These are build-time sizes, not runtime heap or PSRAM measurements.
 
 Vision work remains on local `codex/vision-baseline` commit `70c528c`; this work

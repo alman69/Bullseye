@@ -77,6 +77,10 @@ The backend/device use ordered commands so delayed motion cannot overtake STOP;
 the device also stops active motion on BLE/control-heartbeat loss. See the
 [upload/operator guide](../firmware/esp32-companion/README.md). Compile and
 offline tests pass; combined hardware upload/testing remain operator work.
+The combined PWM adapter now checks LEDC attach/write results, avoiding the old
+immediate-frequency-readback startup race. Actual PWM faults disable both servo
+outputs while BLE/display telemetry stay connected; the UI and backend disable
+motion separately. Native delayed-readback and failed-output tests cover this.
 The vision baseline work was saved separately on `codex/vision-baseline`,
 commit `70c528c`, before switching to this integration. Vendor firmware and
 the original standalone display/scooper sketches remain preserved.

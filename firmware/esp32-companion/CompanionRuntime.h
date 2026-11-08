@@ -2,16 +2,16 @@
 #include <Arduino.h>
 #include <esp_random.h>
 #include "CompanionBle.h"
-#include "ServoOutput.h"
+#include "ArduinoServoPwm.h"
 
 namespace companion {
 class Runtime {
  public:
-  Runtime() : control_(servos_) {}
+  Runtime() : servos_(pwm_), control_(servos_) {}
   CommandMailbox mailbox;
   void begin() {
     bool output = control_.begin(millis(), esp_random());
-    for (uint8_t i = 0; i < scooper::kJointCount; ++i) output &= ledcReadFreq(scooper::kJoints[i].pin) > 0;
+    output &= servos_.initialized();
     control_.outputReady(output);
     if (!output) Serial.println("Scooper PWM failed; motion disabled until restart.");
     Serial.println("Combined BLE display + scooper ready. Serial: status, stop, relax, home, squeeze, release, set 1|2 degrees [speed].");
@@ -21,10 +21,21 @@ class Runtime {
   // Main loop only. Epoch fencing handles a disconnect/reconnect between ticks.
   void link(bool connected, uint32_t epoch, uint32_t now) {
     if (epoch != epoch_) { control_.connectionLost(); epoch_ = epoch; }
-    connected_ = connected; control_.tick(now, connected);
+    connected_ = connected; updateMotion(now);
   }
-  void updateMotion(uint32_t now) { control_.tick(now, connected_); }
-  Result execute(const CommandFrame& frame, uint32_t now) { return apply(control_, frame, now); }
+  void updateMotion(uint32_t now) {
+    control_.outputReady(servos_.healthy());
+    control_.tick(now, connected_);
+    control_.outputReady(servos_.healthy());
+  }
+  Result execute(const CommandFrame& frame, uint32_t now) {
+    control_.outputReady(servos_.healthy());
+    const Result result = apply(control_, frame, now);
+    control_.outputReady(servos_.healthy());
+    const Command command = decodeCommand(frame).command;
+    if (result == Result::Applied && !control_.servoReady() && command != Command::Status && command != Command::Stop) return Result::Refused;
+    return result;
+  }
   void status(uint8_t* out, Result result = Result::Status, uint32_t reply = 0) const { encodeStatus(out, control_, result, reply); }
  private:
   void printStatus() const {
@@ -64,8 +75,9 @@ class Runtime {
       else if (!lineOverflow_) { if (!lineLength_) lineStarted_ = now; line_[lineLength_++] = c; }
     }
   }
-  scooper::LedcServos servos_;
-  Control<scooper::LedcServos> control_;
+  ArduinoServoPwm pwm_;
+  ServoPwm<ArduinoServoPwm> servos_;
+  Control<ServoPwm<ArduinoServoPwm>> control_;
   char line_[64] = {};
   size_t lineLength_ = 0;
   uint32_t lineStarted_ = 0, epoch_ = 0;

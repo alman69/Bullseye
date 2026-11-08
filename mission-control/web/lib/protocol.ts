@@ -82,6 +82,8 @@ export type ScooperState = {
   busy: string | null;
   transport?: "ble" | "http";
   display_updates?: number;
+  ble_connected?: boolean;
+  servo_ready?: boolean | null;
 };
 export type CommandPayload = Record<string, unknown>;
 export type LinkLatency = {
