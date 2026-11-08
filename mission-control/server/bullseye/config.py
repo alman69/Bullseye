@@ -17,7 +17,7 @@ class Settings:
     bench_enabled: bool = False
     rover_host: str = "192.168.4.1"
     rover_port: int = 100
-    scooper_port: str = ""  # USB serial port of the scooper ESP32-S3; empty = auto-detect.
+    scooper_url: str = "http://192.168.4.50"  # Scooper ESP32-S3 on the rover's ELEGOO Wi-Fi.
     web_dist: Path = Path(__file__).resolve().parents[2] / "web" / "dist"
     # Vision runs inside this server on the camera relay's frames (bullseye/vision.py).
     # Off by default for tests; from_env() turns it on unless BULLSEYE_VISION=0.
@@ -29,6 +29,8 @@ class Settings:
             raise ValueError("BULLSEYE_MODE must be simulation or hardware")
         if self.camera_url and urlparse(self.camera_url).scheme not in {"http", "https"}:
             raise ValueError("CAMERA_STREAM_URL must be an HTTP(S) stream URL")
+        if urlparse(self.scooper_url).scheme not in {"http", "https"} or not urlparse(self.scooper_url).hostname:
+            raise ValueError("SCOOPER_URL must be an HTTP URL such as http://192.168.4.50")
         if not 1 <= self.rover_port <= 65535:
             raise ValueError("ROVER_PORT must be 1–65535")
         if self.bench_enabled and self.mode != "hardware":
@@ -44,7 +46,7 @@ class Settings:
             bench_enabled=bench,
             rover_host=os.getenv("ROVER_HOST", "192.168.4.1"),
             rover_port=int(os.getenv("ROVER_PORT", "100")),
-            scooper_port=os.getenv("SCOOPER_PORT", ""),
+            scooper_url=os.getenv("SCOOPER_URL", "http://192.168.4.50"),
             vision_enabled=os.getenv("BULLSEYE_VISION", "1") == "1",
             vision_dir=Path(os.getenv("BULLSEYE_VISION_DIR", str(cls.vision_dir))),
         )

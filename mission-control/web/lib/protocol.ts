@@ -69,11 +69,11 @@ export type MissionState = {
   events: { id: string; at: string; message: string; level: string }[];
   vision?: VisionSummary | null;
 };
-// Scooper ESP32-S3 over USB (server/bullseye/scooper.py). Angles: 90 = straight down.
+// Scooper ESP32-S3 on the rover's Wi-Fi (server/bullseye/scooper.py). Angles: 90 = straight down.
 export type ScooperState = {
   available: boolean;
   status: "disconnected" | "connecting" | "ready" | "error";
-  port: string | null;
+  address: string;
   error: string | null;
   state: "relaxed" | "holding" | "moving" | "sequence" | null;
   sequence: string | null;

@@ -214,8 +214,8 @@ class BenchControl:
     def __init__(self, settings, camera, bridge=None, scooper=None):
         self.settings, self.camera = settings, camera
         self.bridge = bridge or FactoryBridge(settings.rover_host, settings.rover_port)
-        # The scooper is a separate ESP32-S3 on USB, independent of the rover bridge.
-        self.scooper = scooper or ScooperLink(settings.scooper_port)
+        # The scooper is a separate ESP32-S3 on the rover's Wi-Fi, independent of the rover bridge.
+        self.scooper = scooper or ScooperLink(settings.scooper_url)
         self.scooper.on_change = self.publish
         self.lock = asyncio.Lock()
         self.pilot = None
@@ -419,12 +419,12 @@ class BenchControl:
                         self.log(f"One {self.direction} step requested: PWM {payload['speed']}/255, {payload['duration_ms']} ms.")
                         self.launch(lambda: self.bridge.pulse(payload["direction"], payload["speed"], payload["duration_ms"]), "Step finished. STOP acknowledged in software.")
                 elif kind == "scooper_connect":
-                    self.log("Scooper USB link: connecting…")
+                    self.log(f"Scooper Wi-Fi link: connecting to {self.scooper.url}…")
                     self._scooper_job(self._scooper_connect())
                 elif kind in SCOOPER_ACTIONS:
                     # Independent of the rover controls: the pilot seat is enough.
                     if not self.scooper.ready:
-                        raise CommandError("Connect the scooper USB link first.")
+                        raise CommandError("Connect the scooper first.")
                     name = SCOOPER_ACTIONS[kind]
                     self._scooper_job(self._scooper_command(name))
                     self.log(f"Scooper: {SCOOPER_LABELS[name]} requested.")
@@ -448,7 +448,7 @@ class BenchControl:
     async def _scooper_connect(self):
         await self.scooper.connect()
         if self.scooper.ready:
-            self.log(f"Scooper connected on {self.scooper.port}; sticks report {self.scooper.state}.", "success")
+            self.log(f"Scooper connected at {self.scooper.url}; sticks report {self.scooper.state}.", "success")
         else:
             self.log(f"Scooper not connected: {self.scooper.error}", "warning")
         self.publish()

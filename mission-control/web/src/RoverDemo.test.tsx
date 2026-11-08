@@ -169,7 +169,7 @@ it("clears a physically held key on disconnect and never resumes it after reconn
 
 it("shows the scooper panel and sends a squeeze without enabling rover controls", () => {
   state.bench!.armed = false;
-  state.bench!.scooper = { available: true, status: "ready", port: "COM7", error: null, state: "holding", sequence: null, step: null, angles: { left: 90, right: 90 }, busy: null };
+  state.bench!.scooper = { available: true, status: "ready", address: "http://192.168.4.50", error: null, state: "holding", sequence: null, step: null, angles: { left: 90, right: 90 }, busy: null };
   render(<RoverDemo />);
   fireEvent.click(screen.getByRole("button", { name: "Squeeze" }));
   expect(act).toHaveBeenCalledWith("scooper_squeeze");

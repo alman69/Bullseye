@@ -2,8 +2,8 @@
 
 Two SG90 servos swing popsicle sticks together to squeeze an ore block up. The
 firmware runs on the **separate ESP32-S3 board that also drives the 3.1" IPS
-touchscreen** (see `firmware/esp32-display` on `codex/mission-control`). It does
-not run on either rover board and does not touch the vendor firmware.
+touchscreen** (see `firmware/esp32-display`). It does not run on either rover
+board and does not touch the vendor firmware.
 
 The motion:
 
@@ -11,6 +11,10 @@ The motion:
 2. **Squeeze:** both swing out about 30°, then back in to about 80° inward of
    straight down (a 110° swing) to get under the block and lift it.
 3. **Release:** out 30° to drop the block, then straight down.
+
+It's **controlled over Wi-Fi**, like the rest of Mission Control. The ESP32-S3
+joins the rover's own `ELEGOO-…` access point at the fixed address
+**192.168.4.50**. The `/bench` page's Squeeze button reaches it there.
 
 **Status:** not yet compiled for the ESP32 or run on hardware. The angles are the
 ones you described, but they still need checking on the real scooper. Uploading
@@ -21,9 +25,10 @@ this sketch **replaces the display sketch** on the board until the two are merge
 | File | What it is |
 | --- | --- |
 | `bullseye_scooper/ScooperConfig.h` | **Edit this.** Pins, limits, trims, the down/out/in angles and speeds |
+| `bullseye_scooper/WifiConfig.h` | **Edit this** for another rover: ELEGOO network name, fixed address |
 | `bullseye_scooper/Scooper.h` | Nonblocking motion logic (slew, sequences, stop/relax). No Arduino dependency |
 | `bullseye_scooper/ServoOutput.h` | 50 Hz SG90 PWM on the ESP32 LEDC peripheral (no extra library) |
-| `bullseye_scooper/bullseye_scooper.ino` | Initialization and USB serial commands at 115200 baud |
+| `bullseye_scooper/bullseye_scooper.ino` | Initialization, Wi-Fi + HTTP commands, USB serial commands for bench tests |
 | `tests/` | Native logic checks: `firmware/esp32-scooper/tests/run-native.sh` |
 
 ## SG90 pinout
@@ -45,14 +50,46 @@ for SG90s.
 
 **At power-up both sticks snap straight down.** Keep fingers clear.
 
+## Wi-Fi
+
+| Setting | Value (in `WifiConfig.h`) |
+| --- | --- |
+| Network | `ELEGOO-2436CBF61B44`, the team rover's open camera access point |
+| Scooper address | `192.168.4.50` (fixed; the camera is `192.168.4.1`) |
+| Mission Control setting | `SCOOPER_URL=http://192.168.4.50` (the default) |
+
+- **The rover must be on** for the scooper to join. The scooper retries every 10 s,
+  so the power-up order doesn't matter. The servos work from power-up whether or
+  not Wi-Fi is connected.
+- **For a different rover**, change `kWifiSsid`. The name is printed on the
+  camera's serial output and shown in the laptop's Wi-Fi list.
+- **Device limit:** the camera's access point allows **4 devices** at once by
+  default. The laptop plus the scooper make 2, so a phone or two can still join.
+- **The network has no password**, so anyone who joins it can send scooper
+  commands. That's the same as the rover itself.
+
+HTTP API (Mission Control uses this; keep `mission-control/server/bullseye/scooper.py` in sync):
+
+| Request | Reply |
+| --- | --- |
+| `GET /status` | `{"state":"holding","sequence":null,"step":null,"angles":{"left":90,"right":90}}` |
+| `POST /command?name=squeeze` | `200 {"ok":true,"status":{...}}`, or `409 {"ok":false,"error":"..."}` if refused |
+
+Commands: `squeeze`, `release`, `home`, `stop`, `relax`. To test from the laptop
+while it's on the ELEGOO Wi-Fi: open `http://192.168.4.50/status` in a browser, or
+run `curl -X POST "http://192.168.4.50/command?name=squeeze"`.
+
 ## Upload
 
 Use the same Arduino IDE settings as the display sketch: ESP32S3 Dev Module,
 Espressif core **3.3.12** (the LEDC calls need core 3.x), OPI 80 MHz flash,
 32 MB flash, OPI PSRAM, Default 4MB with spiffs, USB CDC On Boot **Disabled**,
-upload 115200 through the **UART** USB connector. No libraries to install.
+upload 115200 through the **UART** USB connector. No libraries to install:
+`WiFi` and `WebServer` come with the ESP32 core.
 
 ## Calibrating (Serial Monitor, 115200, newline)
+
+USB is only for flashing and these bench tests; Mission Control doesn't need it.
 
 1. Power up, then fit the horns so both sticks point straight down, as close as
    the spline allows. Fix what's left with `trimDeg`, in degrees, positive or negative.
@@ -62,6 +99,7 @@ upload 115200 through the **UART** USB connector. No libraries to install.
    speeds in `ScooperConfig.h`. `home` returns straight down; `stop` freezes.
 4. When gripping, the sticks press on the block and the SG90s draw stall current.
    If they buzz or get hot, set `kInDeg` so they just touch the block.
+5. `wifi` shows whether it joined the ELEGOO network and its address.
 
 | Command | Effect |
 | --- | --- |
@@ -71,26 +109,18 @@ upload 115200 through the **UART** USB connector. No libraries to install.
 | `stop` or `x` | Freeze now and cancel a squeeze/release |
 | `relax` | Stop PWM so the servos go limp. The next move re-arms |
 | `set <1-2> <deg> [dps]` | Move one stick (logical degrees: 90 = down, lower = out) |
-| `status`, `help` | Print angles and state, or commands and the pinout |
-
-Every command is answered with one `ok` or `error: <reason>` line. Progress lines
-look like `state=sequence squeeze:out left=60 right=60`. Mission Control parses
-this protocol, so keep `mission-control/server/bullseye/scooper.py` in sync when
-you change it.
+| `status`, `wifi`, `help` | Angles and state, Wi-Fi connection, or commands and the pinout |
 
 ## Squeeze button in Mission Control
 
 The `/bench` page has a **Scooper** panel with Squeeze, Release and Straight down
-buttons, plus Connect. The server opens the board's USB serial port; set
-`SCOOPER_PORT=COM5` (or whatever COM port it shows) if it doesn't auto-detect one ESP32
-port. Only the pilot can press the buttons, but the rover controls don't need to
-be enabled. The global **STOP** also freezes the sticks.
+buttons, plus Connect. Only the pilot can press the buttons, but the rover
+controls don't need to be enabled. The global **STOP** also freezes the sticks.
 
-1. Upload this sketch, then **close the Arduino Serial Monitor**. Only one program
-   can open the port.
-2. Plug the board's UART USB into the laptop and start the bench server.
+1. Power the rover and the scooper. Wait for the Serial Monitor to show
+   `Wi-Fi: connected`, or just give it a few seconds.
+2. With the laptop on the same ELEGOO Wi-Fi, start the bench server and open `/bench`.
 3. Claim controls, press **Connect** in the Scooper panel, then **Squeeze**.
 
-The board stays tethered by USB for now. For it to ride on the rover, the next
-step is a wireless link, most likely a command added to faiyaz's BLE display
-link. Agree on that with the team first, since it changes the display protocol.
+If Connect says the scooper isn't reachable, check that it's powered and that
+`wifi` in the Serial Monitor shows `connected`.
