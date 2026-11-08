@@ -6,7 +6,10 @@
     "reconnect_min_s": 0.5,
     "reconnect_max_s": 5.0,
     "rotate": 0,
-    "controls": {}
+    "controls": {
+      "saturation": 2,
+      "ae_level": -2
+    }
   },
   "detector": {
     "min_area_px": 400,
