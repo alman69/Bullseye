@@ -69,9 +69,12 @@ everything up to PR #10. Things change fast during the hackathon: **check `git l
 **Combined integration prepared on `codex/display-scooper`:** the latest Wi-Fi
 scooper branch is the base. `firmware/esp32-companion/bullseye_companion/`
 contains one generated `.ino` for the same S3's animated display, BLE telemetry
-and GPIO41/42 scooper. The existing `/bench` Scooper panel is retained. The
-backend/device use ordered commands so delayed motion cannot overtake STOP;
-the device also stops active wireless motion on lost contact. See the
+and GPIO41/42 scooper **over one BLE connection owned by Mission Control**.
+The combined sketch no longer joins Wi-Fi; the Mac's rover Wi-Fi is unchanged.
+Stop `send-display.sh`, restart the backend, then Claim controls → Scooper Connect
+to connect both functions. The existing `/bench` Scooper panel is retained.
+The backend/device use ordered commands so delayed motion cannot overtake STOP;
+the device also stops active motion on BLE/control-heartbeat loss. See the
 [upload/operator guide](../firmware/esp32-companion/README.md). Compile and
 offline tests pass; combined hardware upload/testing remain operator work.
 The vision baseline work was saved separately on `codex/vision-baseline`,

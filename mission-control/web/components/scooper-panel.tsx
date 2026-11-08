@@ -1,4 +1,4 @@
-import { Grip, Hand, MoveDown, Wifi } from "lucide-react";
+import { Bluetooth, Grip, Hand, MoveDown, Wifi } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ScooperState } from "@/lib/protocol";
 
@@ -19,9 +19,9 @@ function stickEnd(side: -1 | 1, angle: number) {
 }
 
 function describe(scooper?: ScooperState) {
-  if (!scooper) return "Waiting for the bench server";
+  if (!scooper) return "Restart Mission Control to load scooper support";
   if (!scooper.available) return "Scooper link unavailable";
-  if (scooper.status === "connecting") return "Connecting over Wi-Fi…";
+  if (scooper.status === "connecting") return scooper.transport === "ble" ? "Connecting display + scooper over BLE…" : "Connecting over Wi-Fi…";
   if (scooper.status !== "ready") return scooper.status === "error" ? "Connection failed" : "Not connected";
   if (scooper.state === "sequence") return `${scooper.sequence === "release" ? "Releasing" : "Squeezing"} · ${scooper.step ?? ""}`;
   if (scooper.state === "relaxed") return "Relaxed (servos limp)";
@@ -30,6 +30,7 @@ function describe(scooper?: ScooperState) {
 }
 
 export function ScooperPanel({ scooper, canUse, onAction }: Props) {
+  const ble = scooper?.transport === "ble" || !scooper?.address.startsWith("http");
   const ready = scooper?.status === "ready";
   const busy = !!scooper?.busy || scooper?.status === "connecting";
   const moving = scooper?.state === "sequence";
@@ -37,7 +38,7 @@ export function ScooperPanel({ scooper, canUse, onAction }: Props) {
   const left = stickEnd(-1, scooper?.angles.left ?? DOWN);
   const right = stickEnd(1, scooper?.angles.right ?? DOWN);
   return <section className="panel bench-scooper" aria-label="Ore scooper">
-    <div className="panel-heading"><div className="heading-icon"><Grip size={16} /><h2>Scooper</h2></div><span className="micro">{ready ? `WI-FI · ${scooper?.address.replace(/^https?:\/\//, "")}` : "ESP32-S3 · WI-FI"}</span></div>
+    <div className="panel-heading"><div className="heading-icon"><Grip size={16} /><h2>Scooper</h2></div><span className="micro">{ble ? "DISPLAY + SCOOPER · BLE" : ready ? `WI-FI · ${scooper?.address.replace(/^https?:\/\//, "")}` : "ESP32-S3 · WI-FI"}</span></div>
     <div className="bench-panel-body">
       <div className="bench-scooper-readout">
         <svg viewBox="-60 -8 120 60" className="bench-scooper-diagram" aria-hidden="true">
@@ -53,10 +54,12 @@ export function ScooperPanel({ scooper, canUse, onAction }: Props) {
       <div className="bench-scooper-row">
         <Button disabled={!canMove} onClick={() => onAction("scooper_release")}>Release</Button>
         <Button disabled={!canMove} onClick={() => onAction("scooper_home")}><MoveDown size={15} />Straight down</Button>
-        <Button variant="outline" disabled={!canUse || busy || scooper?.available === false} onClick={() => onAction("scooper_connect")}><Wifi size={15} />{ready ? "Reconnect" : "Connect"}</Button>
+        <Button variant="outline" disabled={!canUse || busy || !scooper?.available} onClick={() => onAction("scooper_connect")}>{ble ? <Bluetooth size={15} /> : <Wifi size={15} />}{ready ? "Reconnect" : "Connect"}</Button>
       </div>
       {scooper?.error && <p className="bench-inline-error" role="status">{scooper.error}</p>}
-      <p className="bench-help">Squeeze: out 30°, then in 80° past straight down to lift the block. STOP freezes the sticks. The scooper joins the rover's ELEGOO Wi-Fi on its own (separate from the rover controls) and needs only the pilot seat.</p>
+      {!canUse && <p className="bench-help">Claim controls in the Pilot seat panel to connect. Rover driving can stay disabled.</p>}
+      {ble && <p className="bench-help">One BLE connection powers the display updates and scooper controls. Stop the separate send-display.sh sender before connecting here. {ready ? `${scooper?.display_updates ?? 0} display updates acknowledged.` : "Claim controls, then Connect."}</p>}
+      <p className="bench-help">Squeeze: out 30°, then in 80° past straight down to lift the block. STOP holds the last commanded angles. {ble ? "Rover Wi-Fi is unchanged." : "Legacy standalone scooper uses the rover Wi-Fi."}</p>
     </div>
   </section>;
 }

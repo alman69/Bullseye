@@ -4,6 +4,7 @@
 #include <iostream>
 #include "CompanionHttp.h"
 #include "CompanionControl.h"
+#include "CompanionBle.h"
 #include "DisplayJson.h"
 #include "DisplayRenderer.h"
 
@@ -52,6 +53,49 @@ struct Servos {
   void write(uint8_t joint, float value) { assert(joint < 2 && attached[joint] && value >= 0 && value <= 180); angle[joint] = value; }
 };
 Request request(Command command, uint32_t sequence, uint32_t boot = 42) { return {command, boot, sequence, 0}; }
+CommandFrame bleFrame(uint8_t opcode, uint32_t sequence, uint32_t epoch = 1) {
+  CommandFrame frame; frame.epoch = epoch;
+  frame.bytes[0] = 'B'; frame.bytes[1] = 'C'; frame.bytes[2] = 1; frame.bytes[3] = opcode;
+  write32(frame.bytes + 4, 42); write32(frame.bytes + 8, sequence); return frame;
+}
+void bleChecks() {
+  Servos output; Control<Servos> control(output); control.begin(0, 42);
+  CommandMailbox mailbox;
+  const auto move = bleFrame(1, 1), stop = bleFrame(4, 3);
+  const uint8_t golden[] = {0x42,0x43,1,1,42,0,0,0,1,0,0,0};
+  assert(!memcmp(move.bytes, golden, sizeof(golden)));
+  assert(decodeCommand(move).command == Command::Squeeze);
+  assert(apply(control, move, 0) == Result::Applied);
+  control.tick(1000, true);
+  assert(apply(control, stop, 1000) == Result::Applied);
+  uint8_t bytes[20]; encodeStatus(bytes, control, Result::Applied, 3);
+  assert(bytes[0] == 'B' && bytes[1] == 'C' && bytes[2] == 1 && bytes[3] == 1);
+  assert(read32(bytes + 4) == 42 && read32(bytes + 8) == 3 && read32(bytes + 12) == 3);
+  assert(bytes[16] == 5 && bytes[17] == control.arm().angle(0) && bytes[19] == 0);
+  assert(apply(control, move, 1001) == Result::Old);
+  assert(apply(control, bleFrame(6, 4), 1002) == Result::Invalid);
+  auto wrong = bleFrame(1, 4); write32(wrong.bytes + 4, 43);
+  assert(apply(control, wrong, 1002) == Result::Old);
+  mailbox.feed(move.bytes, 5, 1); assert(mailbox.takeError() == Result::Invalid);
+  mailbox.feed(move.bytes, 12, 1); mailbox.feed(move.bytes, 12, 1);
+  mailbox.feed(move.bytes, 12, 1); assert(mailbox.takeError() == Result::Overflow);
+  mailbox.feed(stop.bytes, 12, 1); CommandFrame received;
+  assert(mailbox.pop(received) && decodeCommand(received).command == Command::Stop && !mailbox.pop(received));
+  mailbox.feed(move.bytes, 12, 1); mailbox.reset(); assert(!mailbox.pop(received));
+  assert(apply(control, bleFrame(1, 4), 1100) == Result::Applied);
+  control.tick(1200, true); const auto angle = control.arm().angle(0);
+  control.connectionLost(); control.tick(1300, true);
+  assert(control.watchdogStopped() && control.arm().angle(0) == angle);
+  assert(apply(control, bleFrame(1, 6), 1400) == Result::Applied);
+  // Display JSON traffic by itself cannot keep remote scooper movement alive.
+  control.tick(3400, true); assert(control.watchdogStopped());
+  assert(apply(control, bleFrame(1, 8), 3500) == Result::Applied);
+  for (uint32_t now = 3500; now <= 8000; now += 100) {
+    if (now % 500 == 0) assert(apply(control, bleFrame(0, 0), now) == Result::Applied);
+    control.tick(now, true);
+  }
+  assert(control.arm().angle(0) == scooper::kInDeg && !control.watchdogStopped());
+}
 void orderAndTimeoutChecks() {
   Servos output; Control<Servos> control(output);
   assert(control.begin(0, 42)); control.tick(0, true);
@@ -123,6 +167,6 @@ void sharedLoopChecks() {
   assert(telemetry.face.mood(5000) == bullseye::Mood::Curious);
 }
 int main() {
-  httpChecks(); orderAndTimeoutChecks(); sharedLoopChecks();
-  std::cout << "Combined companion checks passed: bounded HTTP, ordered STOP, watchdog, BLE framing, face animation and servo updates.\n";
+  httpChecks(); bleChecks(); orderAndTimeoutChecks(); sharedLoopChecks();
+  std::cout << "Combined companion checks passed: BLE commands/status, bounded mailboxes, ordered STOP, watchdog, telemetry, face animation and servo updates.\n";
 }

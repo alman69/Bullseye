@@ -69,7 +69,7 @@ export type MissionState = {
   events: { id: string; at: string; message: string; level: string }[];
   vision?: VisionSummary | null;
 };
-// Scooper ESP32-S3 on the rover's Wi-Fi (server/bullseye/scooper.py). Angles: 90 = straight down.
+// Combined display/scooper over BLE; legacy standalone HTTP remains optional.
 export type ScooperState = {
   available: boolean;
   status: "disconnected" | "connecting" | "ready" | "error";
@@ -80,6 +80,8 @@ export type ScooperState = {
   step: string | null;
   angles: Record<string, number>;
   busy: string | null;
+  transport?: "ble" | "http";
+  display_updates?: number;
 };
 export type CommandPayload = Record<string, unknown>;
 export type LinkLatency = {

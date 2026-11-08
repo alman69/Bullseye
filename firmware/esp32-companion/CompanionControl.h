@@ -4,7 +4,7 @@
 
 namespace companion {
 // Shared by the actual sketch and native integration checks. Only this main-loop
-// controller changes servo targets; BLE telemetry never enters this interface.
+// controller changes servo targets; telemetry alone never renews motion control.
 template <class Out> class Control {
  public:
   explicit Control(Out& out) : arm_(out) {}
@@ -28,9 +28,10 @@ template <class Out> class Control {
     if (!servoReady_ || !arm_.setJoint(joint, degrees, speed)) return false;
     order_.fence(); wirelessMotion_ = false; return true;
   }
-  void tick(uint32_t now, bool wifi) {
-    if (wifiWasConnected_ && !wifi && wirelessMotion_) stopWireless();
-    wifiWasConnected_ = wifi;
+  void connectionLost() { if (wirelessMotion_) stopWireless(); }
+  void tick(uint32_t now, bool link) {
+    if (linkWasConnected_ && !link) connectionLost();
+    linkWasConnected_ = link;
     const bool moving = arm_.state() == scooper::State::Moving || arm_.state() == scooper::State::Sequence;
     if (wirelessMotion_ && moving && static_cast<uint32_t>(now - lastContact_) >= 2000) stopWireless();
     arm_.update(now);
@@ -57,6 +58,6 @@ template <class Out> class Control {
   scooper::Scooper<Out> arm_;
   CommandOrder order_;
   uint32_t lastContact_ = 0;
-  bool servoReady_ = false, wirelessMotion_ = false, watchdogStopped_ = false, wifiWasConnected_ = false;
+  bool servoReady_ = false, wirelessMotion_ = false, watchdogStopped_ = false, linkWasConnected_ = false;
 };
 }  // namespace companion

@@ -41,3 +41,17 @@ it("shows the scooper's Wi-Fi address once connected", () => {
   render(<ScooperPanel scooper={ready} canUse onAction={vi.fn()} />);
   expect(screen.getByText("WI-FI · 192.168.4.50")).toBeTruthy();
 });
+
+it("describes one shared BLE connection for the display and scooper", () => {
+  render(<ScooperPanel scooper={{ ...ready, transport: "ble", address: "BLE · Bullseye-Display", display_updates: 12 }} canUse onAction={vi.fn()} />);
+  expect(screen.getByText("DISPLAY + SCOOPER · BLE")).toBeTruthy();
+  expect(screen.getByText(/12 display updates acknowledged/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Squeeze" }).hasAttribute("disabled")).toBe(false);
+});
+
+it("explains an unclaimed pilot seat and an outdated server", () => {
+  render(<ScooperPanel canUse={false} onAction={vi.fn()} />);
+  expect(screen.getByText(/Restart Mission Control to load scooper support/)).toBeTruthy();
+  expect(screen.getByText(/Claim controls in the Pilot seat panel/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Connect" }).hasAttribute("disabled")).toBe(true);
+});

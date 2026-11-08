@@ -57,7 +57,7 @@ class ScooperLink:
         return self.status == "ready"
 
     def snapshot(self):
-        return {"available": True, "status": self.status, "address": self.url, "error": self.error,
+        return {"available": True, "transport": "http", "status": self.status, "address": self.url, "error": self.error,
                 "state": self.state, "sequence": self.sequence, "step": self.step,
                 "angles": dict(self.angles), "busy": "stop" if self.stop_task and not self.stop_task.done() else self.busy,
                 "firmware": self.firmware, "ordered_commands": self.boot_id is not None}

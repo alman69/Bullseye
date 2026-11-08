@@ -3,7 +3,9 @@
 **Using the touchscreen S3 for both jobs?** Upload the
 [combined single-file companion sketch](../esp32-companion/README.md) instead.
 It preserves the full-screen animated face/BLE telemetry and adds these scooper
-controls to the same `/bench` UI. The original standalone sketch below remains
+controls to the same `/bench` UI over one BLE connection owned by Mission Control.
+For the legacy Wi-Fi-only sketch below, set `SCOOPER_TRANSPORT=http` in the
+server's local `.env` and restart. The original standalone sketch remains
 available for reference and servo-only testing.
 
 Two SG90 servos swing popsicle sticks together to squeeze an ore block up. The

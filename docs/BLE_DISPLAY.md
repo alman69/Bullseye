@@ -1,8 +1,10 @@
 # Separate BLE telemetry display
 
 For this display **plus the scooper on the same ESP32-S3**, use the
-[combined one-file upload](../firmware/esp32-companion/README.md). BLE UUIDs,
-the sender commands and the full-screen animated face remain unchanged.
+[combined one-file upload](../firmware/esp32-companion/README.md). Mission Control
+owns one BLE connection for both display telemetry and scooper commands; stop
+the separate sender when using that firmware from the Scooper panel. The
+instructions below describe the preserved standalone display/sender setup.
 
 The Mac reads **cached ultrasonic telemetry** from the existing real-rover
 controller and forwards it to a separate ESP32-S3 touchscreen over BLE. It can

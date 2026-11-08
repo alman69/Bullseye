@@ -1,4 +1,4 @@
-# Bullseye Companion — one upload for display and scooper
+# Bullseye Companion — display and scooper on one BLE connection
 
 Upload **one file** to the existing ESP32-S3 touchscreen board:
 
@@ -6,31 +6,36 @@ Upload **one file** to the existing ESP32-S3 touchscreen board:
 /Users/faiyaz/Bullseye/firmware/esp32-companion/bullseye_companion/bullseye_companion.ino
 ```
 
-This sketch contains the animated full-screen pixel face, swipeable Distance /
-Link pages, the unchanged BLE telemetry protocol, and both scooper servos with
-Wi-Fi control from the **existing `/bench` Mission Control UI**. It does not
-connect to the rover camera stream or send UNO/motor commands. Original vendor,
-display-only and scooper-only sources remain available separately.
+It contains the full-screen animated pixel face, three swipe pages, BLE distance
+telemetry and both scooper servos. **The companion uses no Wi-Fi or HTTP server.**
+Mission Control owns one BLE connection and forwards cached ultrasonic readings
+while accepting scooper actions from the existing `/bench` panel.
 
-The generated `.ino` has all project headers embedded. Open that actual file
-with Arduino IDE; no copying of other project files or tabs is needed. External
-libraries already used by the display remain required.
+```text
+Browser → Mission Control on Mac → Wi-Fi → rover ESP32 ↔ UNO
+                    ↕ one BLE GATT session
+                 ESP32-S3 → touchscreen + GPIO41/42 scooper
+```
 
-## Hardware and upload settings
+The generated `.ino` embeds all project headers. No other project tabs need to be
+copied into Arduino IDE. The original vendor firmware, standalone display and
+standalone Wi-Fi scooper sources remain preserved.
 
-Keep the existing display/touch wiring and initialization unchanged:
+## Hardware and upload
 
-- ST7365P LCD on SPI12/13/11, CS10, DC8, reset9, backlight 3V3.
+No wiring changes:
+
+- LCD: SPI12/13/11, CS10, DC8, reset9, backlight 3V3.
 - `screen.begin(8000000)`, rotation 3, 480×320.
-- Touch SDA4/SCL5, reset6/INT7; 100 kHz, 5 ms I2C timeout, 20 ms polling.
-- Servo signals: **GPIO41 left / GPIO42 right**. The existing right-servo
-  inversion, trims and limits come from `esp32-scooper/ScooperConfig.h`.
-- Power the SG90 servos from a suitable **separate 5 V supply with shared GND**.
-  The S3 USB powers its logic/display. Do not power servos from 3V3.
+- Touch: SDA4/SCL5, reset6/INT7, 100 kHz, 5 ms timeout, 20 ms polling.
+- Servo signals: GPIO41 left, GPIO42 right. Existing mirrored right output,
+  limits, trims and poses come from `esp32-scooper/ScooperConfig.h`.
+- Use a suitable separate **5 V servo supply with common GND**; do not power the
+  servos from 3V3. USB supplies the S3 logic/display.
 
-**Both servos are commanded to 90° at boot**, after display/BLE initialization.
-The inherited squeeze is 90° → 60° → 170°. These are software commands, not
-measured positions; horn alignment and mechanical limits need operator checks.
+**The servos are commanded to 90° at boot.** Clear the mechanism before upload
+or reset. Squeeze remains 90° → 60° → 170°. Angles are commanded positions;
+horn alignment, load, mechanical range and physical stopping need operator checks.
 
 | Arduino setting | Value |
 | --- | --- |
@@ -41,100 +46,103 @@ measured positions; horn alignment and mechanical limits need operator checks.
 | USB CDC On Boot | Disabled |
 | Upload / serial speed | 115200, UART USB connector |
 
-Libraries: the existing working DFRobot_GDL, Adafruit GFX and Adafruit BusIO.
-BLE, cJSON, Wi-Fi, Network and LEDC come from the installed core. No ESP32Servo,
-BluetoothSerial or additional Arduino library is needed.
+Keep DFRobot_GDL, Adafruit GFX and Adafruit BusIO. BLE, cJSON and LEDC come from
+the installed core. No additional Arduino libraries are needed.
 
-## Connect everything
+## Operator setup
 
-1. Stop `send-display.sh` with Ctrl-C while uploading. Close/reopen the combined
-   sketch in Arduino IDE, select the same board settings, and upload it yourself.
-2. Expect the same full-screen animated face, with Auto on and no labels or
-   buttons. Swipes still cycle Face → Distance → Link → Face.
-3. Power the rover AP. Both the Mac and the companion S3 join
-   `ELEGOO-2436CBF61B44`. The companion uses **192.168.4.50**; the camera/rover
-   remains **192.168.4.1**. The S3 retries Wi-Fi every 10 seconds. Wi-Fi is for
-   scooper commands; BLE independently carries display telemetry.
-4. First check **status only**, from the Mac on rover Wi-Fi:
-
-   ```sh
-   curl --max-time 5 http://192.168.4.50/status
-   ```
-
-   Expect JSON containing `firmware: "bullseye-companion"`, `api: 2`,
-   `servo_ready: true`, a nonzero `boot_id`, commanded angles and current state.
-   A PWM failure disables motion and is reported rather than enabling buttons.
-5. Restart the old Mission Control server, so its backend matches the new
-   firmware, then run the usual command:
+1. Stop the old `send-display.sh` process with Ctrl-C. Only **one** central can
+   connect; Mission Control now sends both display data and scooper actions.
+2. Upload the updated single `.ino` above yourself, using the same S3 settings.
+   The full-screen face animates immediately, without a connection. Auto stays
+   on, taps do nothing, and swipes cycle Face → Distance → Link → Face.
+3. Stop/restart the old Mission Control server so it loads the BLE integration:
 
    ```sh
    /Users/faiyaz/Bullseye/mission-control/run-rover-demo.sh
    ```
 
-   Open **http://127.0.0.1:8001/bench**. The frontend on this branch includes the
-   Scooper panel. **Claim controls → Scooper Connect**, then use **Squeeze**,
-   **Release**, or **Straight down** after checking the mechanism's range. Rover
-   driving can remain disabled. Connecting stops any already-reported scooper
-   movement; reconnection never replays an earlier command.
-6. Restart the existing BLE sender in another terminal:
+4. Refresh **http://127.0.0.1:8001/bench**. Click **Claim controls**, then **Connect
+   inside the Scooper panel**. It should say **DISPLAY + SCOOPER · BLE**. A BLE
+   connection first requests STOP to hold the current pose. Only after its
+   acknowledgement do Squeeze / Release / Straight down become available.
+5. Connect the rover bridge in the same page for real ultrasonic readings. The
+   Mac remains on ELEGOO Wi-Fi for that existing bridge and camera. Mission
+   Control forwards its cached readings to the display twice per second,
+   without opening another rover connection or requesting additional samples.
+6. Check the display's Distance page and the panel's acknowledged-update count,
+   then test the scooper's range with the mechanism clear. Rover driving can
+   remain disabled. STOP in the website also requests scooper STOP over BLE.
 
-   ```sh
-   /Users/faiyaz/Bullseye/mission-control/send-display.sh
-   ```
+**Do not start `send-display.sh` alongside this setup.** It remains available for
+standalone display/demo use, but it occupies the same BLE peripheral. The old
+sender has no scooper control heartbeat and cannot operate the servos.
 
-   Connect the rover bridge in the browser if actual ultrasonic telemetry is
-   wanted. `send-display.sh --demo` still works for the display without it.
-   The face needs neither link to keep animating. The display's Link page reports
-   the BLE/relayed rover telemetry connection, not proof of scooper Wi-Fi health.
+The existing optional Bleak dependency is used. If it is missing:
 
-`SCOOPER_URL=http://192.168.4.50` is the backend default. No USB data tether is
-required for scooper control once flashed; USB may still supply board power.
-The existing tunnel arrangement is unchanged: browsers talk to Mission Control,
-and Mission Control talks to the two rover-network devices. Remote browsers need
-no direct route to 192.168.4.50.
-
-## STOP and connection loss
-
-- The sticky/global website **STOP** cancels queued/in-flight scooper work and
-  sends a newer ordered STOP, alongside the existing UNO stop behavior.
-- The device rejects duplicate/older command IDs, including a squeeze packet
-  delivered after a newer STOP. IDs are tied to the current device boot.
-- Pilot disconnect/release/expiry still stops the rover and scooper through the
-  coordinator. Only the pilot can start scooper actions; any viewer may STOP.
-- Missing **server-to-companion HTTP contact for two seconds** stops active
-  scooper motion locally. A detected companion Wi-Fi loss also stops it. Normal
-  `/status` polling supplies contact; BLE telemetry does not renew this lease.
-- STOP/watchdog hold the last commanded angles; they do not remove holding
-  torque or guarantee freedom from a mechanical stall. `relax` is available via
-  serial to turn pulses off. Physical stopping and servo current need operator
-  verification.
-- Slow/incomplete HTTP clients cannot hold the drawing/servo loop: parsing and
-  socket I/O are bounded and nonblocking. Header/response deadline is 500 ms.
-
-## Protocol and local calibration
-
-`GET /status` is read-only. All wireless actions use:
-
-```text
-POST /command?name=squeeze|release|home|stop|relax&boot=<boot_id>&seq=<increasing uint32>
+```sh
+cd /Users/faiyaz/Bullseye/mission-control/server
+.venv/bin/python -m pip install -r requirements-ble-macos.lock.txt -e '.[ble]'
 ```
 
-The updated backend handles IDs automatically. An old backend using only
-`?name=` receives 409 and must be restarted/updated; it cannot start an unordered
-move. Command acknowledgement means accepted by the firmware, not independently
-verified servo motion. HTTP connections close after each bounded response.
+Enable Bluetooth and allow the terminal launching Mission Control under macOS
+System Settings → Privacy & Security → Bluetooth. Browser Bluetooth permissions
+and Web Bluetooth are not required; all BLE operations occur on the Mac server.
 
-Serial Monitor (115200, newline) supports `status`, `wifi`, `stop`, `relax`,
-`home`, `squeeze`, `release`, and `set 1|2 degrees [speed]`. Local calibration
-does not require the HTTP heartbeat. Servo poses/pins/trims remain in the
-original `ScooperConfig.h`; after editing, regenerate the upload file below.
+If several displays are found, stop other senders, run `send-display.sh --list`,
+then set `BLE_DISPLAY_DEVICE_ID` in the server's local `.env` and restart.
+Use the listed **CoreBluetooth identifier**, not an assumed MAC address.
+See [Bleak's macOS guide](https://bleak.readthedocs.io/en/latest/backends/macos.html).
 
-## Maintaining the single file
+`SCOOPER_TRANSPORT=ble` is the default. `SCOOPER_TRANSPORT=http` and
+`SCOOPER_URL=http://192.168.4.50` retain the separate legacy Wi-Fi-only sketch's
+backend for comparison. This combined BLE sketch has no endpoint at that IP.
+Remote browsers still use the existing single Mission Control origin/tunnel;
+only the laptop must be within BLE range of the S3.
 
-Source modules remain readable/testable in `esp32-display/`, `esp32-scooper/`
-and this folder. The generator embeds them in order and adds the common loop.
-It never includes vehicle credentials or any Onebox networking. The existing
-Onebox-derived touch driver attribution is retained.
+## Safety and protocol
+
+- One pilot starts actions; every visitor may press STOP. Pilot loss requests
+  STOP for both the UNO and companion using the existing coordinator.
+- Command acknowledgements identify a device boot and increasing command number.
+  STOP cancels queued/in-flight work; delayed older packets cannot overtake it.
+- BLE disconnect or connection-epoch change stops active remote scooper motion
+  in the main loop and discards queued commands. No automatic motion reconnect.
+- Missing **control heartbeat for two seconds** stops active motion, even if
+  display telemetry still arrives. Missing acknowledgements or stale device
+  status closes the backend session and requires explicit Reconnect.
+- STOP/watchdog hold the last commanded angles; they do not remove holding
+  torque or independently verify a physical stop. Serial `relax` turns pulses
+  off. Local serial calibration does not require the BLE heartbeat.
+- BLE callbacks copy fixed-size commands into a bounded two-frame mailbox;
+  parsing, actuation and drawing occur in the main loop. Display/touch behavior
+  and the original telemetry framing remain unchanged.
+
+All UUIDs share suffix `-6f54-4a9c-8b2d-56e39a18c201`:
+
+| UUID prefix | Purpose |
+| --- | --- |
+| `3f7c1000` | Existing advertised service, name Bullseye-Display |
+| `3f7c1001` / `3f7c1002` | Existing telemetry JSON writes / 8-byte BS acknowledgements |
+| `3f7c1003` | Scooper commands, write with response |
+| `3f7c1004` | Scooper status/ACK, read + notify |
+
+Control commands are **12 bytes**, little endian: ASCII `BC`, version `1`,
+opcode, uint32 boot ID, uint32 command number. Opcodes: 0 heartbeat, 1 squeeze,
+2 release, 3 home, 4 stop, 5 relax. Heartbeats have command number zero; actions
+require positive strictly increasing numbers. The initial boot ID is read from
+status. All writes fit the minimum ATT payload; GATT write success alone is not
+an application acknowledgement.
+
+Status is **20 bytes**: `BC`, version, result, uint32 boot ID, uint32 latest
+accepted command, uint32 acknowledged request, flags, left angle, right angle,
+sequence step (1-based, zero outside a sequence). Flags: bit 0 PWM ready, bit 1
+watchdog stopped, bits 2–3 state (relaxed/holding/moving/sequence), bit 4 release
+sequence. Result: 0 periodic status, 1 applied, 2 invalid, 3 old, 4 refused,
+5 overflow. Periodic status is sent every 500 ms; unapplied commands never count
+as verified motion. Frame sizes and integer fields are tested in Python and C++.
+
+## Development checks
 
 ```sh
 python3 /Users/faiyaz/Bullseye/firmware/esp32-companion/generate.py
@@ -142,30 +150,24 @@ python3 /Users/faiyaz/Bullseye/firmware/esp32-companion/generate.py --check
 /Users/faiyaz/Bullseye/firmware/esp32-companion/tests/run-native.sh
 ```
 
-Compile only:
+Compile only, with no hardware access:
 
 ```sh
 '/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli' compile \
   --fqbn 'esp32:esp32:esp32s3:FlashSize=32M,FlashMode=opi,PSRAM=opi,CDCOnBoot=default,PartitionScheme=default,UploadSpeed=115200' \
-  --build-path /private/tmp/bullseye-companion-build --jobs 4 \
+  --build-path /private/tmp/bullseye-companion-ble-build --jobs 4 \
   /Users/faiyaz/Bullseye/firmware/esp32-companion/bullseye_companion
 ```
 
-The combined build uses **1,220,410 bytes flash (93% of the selected 1,310,720-byte
-app partition)** and **56,888 bytes globals (17%; 270,792 bytes remaining)**.
-Those are build-time numbers, not measurements of runtime heap/PSRAM usage.
+Software checks use fake BLE transports and native sanitizer tests. Physical
+upload, BLE permission, combined servo/display operation and range tests remain
+operator-performed; the agent does not flash, open serial or connect live BLE.
 
-Native sanitizer checks cover bounded/fragmented HTTP, invalid requests,
-out-of-order STOP, link watchdog, failed output initialization and the real
-shared servo/face/BLE core loop. Backend tests cover command ordering,
-cancellation, restart/reconnect and pilot rules; frontend tests exercise the
-existing Scooper panel and rover controls. **No upload, serial/BLE interaction
-or physical combined-board test was performed by the agent.** Verification on
-November 8, 2026: **149 backend tests**, **53 frontend tests**, TypeScript /
-production build, native display and combined-controller sanitizer checks all
-pass. The standalone scooper motion checks were also compiled/run during review.
+Verified November 8, 2026: **159 backend tests**, **55 frontend tests**, native
+sanitizer checks, TypeScript and the production build pass. The combined sketch
+compiles against the installed core/libraries: **678,782 bytes flash (51% of the
+1,310,720-byte app partition)** and **34,380 bytes static RAM (10%; 293,300 bytes
+remaining)**. These are build-time sizes, not runtime heap or PSRAM measurements.
 
-Vision baseline work was preserved separately in local commit **70c528c** on
-`codex/vision-baseline`. This integration is on **codex/display-scooper** based
-on the teammate's latest Wi-Fi scooper branch; it does not require merging the
-vision experiment into the upload.
+Vision work remains on local `codex/vision-baseline` commit `70c528c`; this work
+is on `codex/display-scooper`. Original vendor and standalone sources are intact.

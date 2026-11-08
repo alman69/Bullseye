@@ -130,7 +130,7 @@ class HttpDecoder {
   int error_ = 0;
 };
 
-// A newer STOP invalidates older packets even if Wi-Fi delivers them late.
+// A newer STOP invalidates older packets even if a transport delivers them late.
 class CommandOrder {
  public:
   explicit CommandOrder(uint32_t boot = 1) : boot_(boot ? boot : 1) {}
