@@ -115,6 +115,8 @@ def test_bench_requires_enabled_controls(vision):
         await bench.command("pilot", "claim", {})
         with pytest.raises(CommandError):
             await bench.command("pilot", "auto_goto", {"color": "red", "arm_token": None})
+        with pytest.raises(CommandError):
+            await bench.command("pilot", "sample_collected", {"arm_token": None})
     asyncio.run(run())
 
 
@@ -184,12 +186,12 @@ class SonarWorld(World):
         return True
 
 
-def test_collect_stops_at_10_cm_by_ultrasonic_and_turns_leds_green(vision):
+def test_collect_stops_at_10_cm_by_ultrasonic_then_hands_over(vision):
     world, reports = SonarWorld(vision), []
     pilot = Autopilot(world, vision, lambda state, message: reports.append(state))
     assert asyncio.run(world.drive(pilot.collect("red")))
     assert 10 <= world.cm < 12.7                                     # at 10 cm, within one smallest step
-    assert world.leds == [(255, 0, 0), (0, 255, 0)] and reports[-1] == "collected"
+    assert world.leds == [(255, 0, 0)] and reports[-1] == "arrived"  # LEDs stay red until the pilot grabs it
 
 
 def test_return_to_base_stops_15_cm_from_the_flag_wall(vision, monkeypatch):

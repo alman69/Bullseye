@@ -10,18 +10,19 @@ const state = {
   vision: { available: true, error: null },
 } as unknown as MissionState;
 
-it("sends mission, go-to and return-to-base with the current arm token", () => {
+it("sends go-to, sample collected and sample deposited with the current arm token", () => {
   const act = vi.fn().mockResolvedValue(true);
   render(<AutopilotPanel state={state} canStep act={act} />);
   expect(screen.queryByRole("button", { name: "blue" })).toBeNull(); // blue = obstacles, not a target
   fireEvent.click(screen.getByRole("button", { name: "green" }));
   expect(screen.getByRole("button", { name: /Avoid obstacles: on/ })).toBeTruthy(); // on by default
-  fireEvent.click(screen.getByRole("button", { name: /Run mission \(green\)/ }));
-  expect(act).toHaveBeenCalledWith("auto_mission", { color: "green", avoid: true, arm_token: "tok" });
+  expect(screen.queryByRole("button", { name: /Run mission|Return to base/ })).toBeNull(); // home is driven by hand
   fireEvent.click(screen.getByRole("button", { name: /Go to green/ }));
   expect(act).toHaveBeenCalledWith("auto_goto", { color: "green", avoid: true, arm_token: "tok" });
-  fireEvent.click(screen.getByRole("button", { name: /Return to base/ }));
-  expect(act).toHaveBeenCalledWith("auto_return", { avoid: true, arm_token: "tok" });
+  fireEvent.click(screen.getByRole("button", { name: /Sample collected/ }));
+  expect(act).toHaveBeenCalledWith("sample_collected", { arm_token: "tok" });
+  fireEvent.click(screen.getByRole("button", { name: /Sample deposited/ }));
+  expect(act).toHaveBeenCalledWith("sample_deposited", { arm_token: "tok" });
 });
 
 it("stays disabled until controls are enabled", () => {

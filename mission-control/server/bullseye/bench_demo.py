@@ -459,6 +459,21 @@ class BenchControl:
                     self.direction, self.drive_mode = "auto", "auto"
                     self.log(label + ".")
                     self.launch(lambda: self._autopilot(job), "Autopilot finished. STOP acknowledged in software.")
+                elif kind in {"sample_collected", "sample_deposited"}:
+                    # Manual-grab flow: the pilot drove up, grabbed the sample, and (later) drove it home.
+                    if not self.armed or not self.bridge.connected or self.stopped:
+                        raise CommandError("Connect and enable controls first.")
+                    if self.operation or self.stop_pending:
+                        raise CommandError("A step or STOP is in progress. Commands are not queued.")
+                    if payload.get("arm_token") != self.arm_token:
+                        raise CommandError("This request is outdated. Use the current controls.")
+                    collected = kind == "sample_collected"
+                    rgb = (0, 255, 0) if collected else (255, 0, 0)
+                    state, message = (("collected", "Sample collected. LEDs green. Drive it back to base.") if collected
+                                      else ("deposited", "Sample deposited at home base. LEDs red."))
+                    self.log(message, "success")
+                    self._report(state, message)
+                    self.launch(lambda: self.bridge.set_led(rgb), f"LEDs {'green' if collected else 'red'}.")
                 else:
                     raise CommandError("Unknown rover command.")
             self.publish()

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Flag, Navigation, Rocket } from "lucide-react";
+import { Flag, Hand, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { MissionState } from "@/lib/protocol";
 import { CLASS_HEX } from "@/lib/vision";
@@ -41,9 +41,10 @@ export function AutopilotPanel({
       </div>
       <div className="vision-body">
         <p className="vision-help">
-          Pick the mineral and press <b>Run mission</b>: the rover finds it, stops 10 cm away (LEDs turn green, “Sample
-          collected”), turns 180° and drives to the black flag, stopping 15 cm from the wall (“Sample deposited”, LEDs back
-          to red). If it can’t see a target it keeps exploring open floor. Blue = obstacles. STOP cancels at any time.
+          1) Pick the mineral and press <b>Go to</b>: the rover searches (exploring open floor if needed), drives to it and
+          stops about 10 cm away. 2) <b>Take manual control</b>: drive up and grab it, then press <b>Sample collected</b>
+          (LEDs green). 3) Drive it back to base and press <b>Sample deposited</b> (LEDs red). Blue = obstacles. STOP cancels
+          at any time.
         </p>
         <div className="vision-targets" role="group" aria-label="Mineral">
           {ORES.map((c) => (
@@ -57,14 +58,14 @@ export function AutopilotPanel({
           Avoid obstacles: {avoid ? "on" : "off"}
         </Button>
         <div className="vision-actions">
-          <Button disabled={!ready} onClick={() => send("auto_mission", { color, avoid, arm_token: token })}>
-            <Rocket size={14} /> Run mission ({color})
-          </Button>
-          <Button variant="outline" disabled={!ready} onClick={() => send("auto_goto", { color, avoid, arm_token: token })}>
+          <Button disabled={!ready} onClick={() => send("auto_goto", { color, avoid, arm_token: token })}>
             <Navigation size={14} /> Go to {color}
           </Button>
-          <Button variant="outline" disabled={!ready} onClick={() => send("auto_return", { avoid, arm_token: token })}>
-            <Flag size={14} /> Return to base
+          <Button variant="outline" disabled={!canStep || !token} onClick={() => send("sample_collected", { arm_token: token })}>
+            <Hand size={14} /> Sample collected
+          </Button>
+          <Button variant="outline" disabled={!canStep || !token} onClick={() => send("sample_deposited", { arm_token: token })}>
+            <Flag size={14} /> Sample deposited
           </Button>
         </div>
         {!canStep && <p className="vision-note">Connect the rover bridge and enable controls first.</p>}

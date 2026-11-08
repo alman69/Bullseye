@@ -252,11 +252,19 @@ class Autopilot:
             await self._step(f"turn_{TURN_DIRECTION}", self.vision.cfg["navigation"].get("turn_pwm", 60), ms)
 
     async def collect(self, color: str, avoid: bool = False) -> bool:
-        """Drive to a mineral; on arrival the LEDs turn green and Mission Control says 'Sample collected'."""
+        """Drive to a mineral and stop ~10 cm away. The pilot then takes manual control: drives up,
+        grabs it ("Sample collected" turns the LEDs green) and drives it back to base."""
         if color == "black":
             return await self.go_to(color, avoid=avoid)
         await self._led(RED)
         await self.go_to(color, avoid=avoid)
+        self.report("arrived", f"Arrived about 10 cm from {color}. Take manual control: drive up, grab it, "
+                               "press Sample collected, then drive it back to base.")
+        return True
+
+    async def collect_and_signal(self, color: str, avoid: bool = False) -> bool:
+        """Old fully automatic flow: arrival itself counts as collected (LEDs green). Used by mission()."""
+        await self.collect(color, avoid=avoid)
         await self._led(GREEN)
         self.report("collected", f"Sample collected: {color}. LEDs green.")
         return True
@@ -271,6 +279,6 @@ class Autopilot:
 
     async def mission(self, color: str, avoid: bool = False, pause_s: float = 3.0) -> bool:
         """The whole run: collect the mineral, pause (pickup), return to base."""
-        await self.collect(color, avoid=avoid)
+        await self.collect_and_signal(color, avoid=avoid)
         await asyncio.sleep(pause_s)
         return await self.return_to_base(avoid=avoid)
