@@ -24,6 +24,8 @@ NAMES = {"red": "ruby", "green": "emerald"}   # what the operator sees
 
 STOP_CM = 10.0          # final gap in front of the sample
 SONAR_MARGIN_CM = 1.0   # the sonar reports whole centimetres: stop one centimetre early, never short of 10
+STOP_BUFFER_CM = 2.0    # default leeway: aim to stop this much before 10 cm so the sample is never hit
+STEP_SHARE = 0.6        # near the end a step covers at most this share of the remaining room (step-table error)
 FAR_STEP_CM = 15.0      # longest forward step when there is lots of room (one 1 s pulse)
 NEAR_STEP_CM = 7.5      # forward step once the sample is within FAR_GAP_CM or low in the image
 FINAL_STEP_CM = 2.7     # forward step when the sample is almost at the bottom of the image
@@ -81,6 +83,7 @@ class Autopilot:
         self.hfov = float(nav.get("camera_hfov_deg") or nav.get("glimpse_hfov_deg") or 50)
         self.wall_cm = float(nav.get("wall_distance_cm", 25))
         self.arrive_bottom_y = float(nav.get("arrive_bottom_y", ARRIVE_BOTTOM_Y))
+        self.stop_buffer = max(0.0, float(nav.get("stop_buffer_cm", STOP_BUFFER_CM)))
         self.deadline = math.inf
         self.first_side = "left"           # alternate which side is checked first at walls
         self.obstacles = None              # blue-obstacle check from the latest looked-at frame
@@ -277,7 +280,10 @@ class Autopilot:
         high = det.bottom_y is None or det.bottom_y < self.arrive_bottom_y - 0.25
         step = FINAL_STEP_CM if low else FAR_STEP_CM if high and (gap is None or gap > FAR_GAP_CM) else NEAR_STEP_CM
         if gap is not None:
-            step = min(step, gap - STOP_CM - SONAR_MARGIN_CM)
+            # Never aim past the buffered stop point, and near the end cover only part of the
+            # remaining room, so a step that runs long (battery, floor) still stops short.
+            room = gap - STOP_CM - self.stop_buffer - SONAR_MARGIN_CM
+            step = min(step, max(FINAL_STEP_CM, STEP_SHARE * room), room)
         return step
 
     async def approach(self, color, det):
@@ -302,7 +308,7 @@ class Autopilot:
                 await self._move("right" if error > 0 else "left", max(50, min(400, self.turn_ms(degrees))), self.turn_pwm)
             else:
                 gap = await self._gap(det)
-                if gap is not None and gap - SONAR_MARGIN_CM <= STOP_CM:
+                if gap is not None and gap - SONAR_MARGIN_CM <= STOP_CM + self.stop_buffer:
                     return True, det
                 if self._blocked(self.obstacles):
                     raise AutopilotError(f"An obstacle is between the rover and the {name}. Stopped; drive around it manually.")

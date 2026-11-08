@@ -191,10 +191,32 @@ def test_turn_and_forward_tables_round_trip(vision):
 def test_mission_scans_approaches_and_stops_10_cm_away(vision):
     world, reports = SonarWorld(vision), []
     assert asyncio.run(world.drive(Autopilot(world, vision, reports_of(reports)).mission("red")))
-    assert 10 <= world.cm < 12.7                                    # about 10 cm, within one small step
+    assert 11 <= world.cm <= 14.7                                   # 10 cm + 2 cm leeway, within one small step
     assert world.leds == [(255, 0, 0), (0, 255, 0)]
     assert reports[-1] == "manual_pickup" and "approaching" in reports
     assert vision.target == "red"
+
+
+@pytest.mark.parametrize("overshoot", [1.0, 1.4])
+def test_never_gets_closer_than_10_cm_even_if_steps_run_long(vision, overshoot):
+    class LongSteps(SonarWorld):
+        """Every forward pulse travels `overshoot` × the step table (low battery, slippery floor)."""
+        async def pulse(self, direction, speed, duration_ms):
+            before = self.cm
+            await super().pulse(direction, speed, duration_ms)
+            self.cm = before - (before - self.cm) * overshoot
+            self.closest = min(getattr(self, "closest", self.cm), self.cm)
+
+    world = LongSteps(vision)
+    assert asyncio.run(world.drive(Autopilot(world, vision).find("red")))
+    assert world.closest >= 10 and world.cm <= 15
+
+
+def test_stop_buffer_is_configurable(vision):
+    vision.cfg["navigation"]["stop_buffer_cm"] = 0
+    world = SonarWorld(vision)
+    assert asyncio.run(world.drive(Autopilot(world, vision).find("red")))
+    assert 10 <= world.cm < 12.7                                    # no leeway: right at 10 cm
 
 
 def test_off_center_target_is_centered_before_driving(vision):
@@ -227,7 +249,7 @@ def test_sample_hidden_behind_a_wall_is_found_with_only_one_360(vision):
     pilot = Autopilot(world, vision, lambda state, message: messages.append((state, message)))
     assert asyncio.run(world.drive(pilot.find("red")))
     distance, _ = world._sample()
-    assert 9 <= distance <= 13                                      # stopped about 10 cm from it
+    assert 10 <= distance <= 15                                     # stopped about 12 cm from it, never touching
     first_explore = next(i for i, (state, _) in enumerate(messages) if state == "relocating")
     assert not any("/360°" in message for _, message in messages[first_explore:])   # never a second 360
     assert any("Wall ahead" in message for _, message in messages)  # it checked the sides at the wall

@@ -46,6 +46,7 @@ TUNABLE = {
     "navigation.approach_zone_y": (float, 0.0, 0.3),
     "navigation.arrive_bottom_y": (float, 0.5, 1.0),
     "navigation.wall_distance_cm": (float, 10.0, 60.0),
+    "navigation.stop_buffer_cm": (float, 0.0, 10.0),
 }
 # Camera sensor settings sent to the ESP32's /control endpoint (runtime only, reset on power-off;
 # no firmware change). Under the floodlight: more saturation and less exposure keep colors visible.

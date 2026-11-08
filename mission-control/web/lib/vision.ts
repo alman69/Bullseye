@@ -125,6 +125,7 @@ export const TUNING: { key: string; label: string; min: number; max: number; ste
   { key: "navigation.arrive_distance_cm", label: "Stop distance (cm)", min: 2, max: 60, step: 1, hint: "Moves the stop line once the ground is calibrated." },
   { key: "navigation.approach_zone_y", label: "Approach zone height", min: 0, max: 0.3, step: 0.01, hint: "Band above the stop line with tiny steps." },
   { key: "navigation.arrive_bottom_y", label: "Arrive at image bottom", min: 0.5, max: 1, step: 0.01, hint: "Sample's bottom edge this low in the image counts as 10 cm away (paper below the sonar beam)." },
+  { key: "navigation.stop_buffer_cm", label: "Stop early by (cm)", min: 0, max: 10, step: 0.5, hint: "Leeway before the 10 cm stop so the rover never touches the sample. 2 cm stops about 12 cm away." },
   { key: "navigation.wall_distance_cm", label: "Wall margin (cm)", min: 10, max: 60, step: 1, hint: "Driving toward open space stops this far from a wall." },
 ];
 

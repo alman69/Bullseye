@@ -22,9 +22,13 @@ behaviour (Claim controls → Connect rover bridge → Enable controls).
 2. **Found → approach.** Turn to center the sample, then step forward. Steps are 15 cm while the
    gap is over 35 cm and the sample is high in the image, 7.5 cm closer in, and 2.7 cm when it is
    nearly at the bottom of the image. The gap is the closer of the sonar reading and the camera's
-   ground estimate. Stop at 10 cm (1 cm early for whole-centimetre sonar), or when the sample's
-   bottom edge reaches `navigation.arrive_bottom_y` (default 0.85), which covers paper balls
-   below the sonar beam. A blue obstacle in the path stops the search.
+   ground estimate. Stop at 10 cm **plus a leeway** (`navigation.stop_buffer_cm`, default 2 cm,
+   slider "Stop early by" — so normally about 12 cm, 1 cm more for whole-centimetre sonar), or
+   when the sample's bottom edge reaches `navigation.arrive_bottom_y` (default 0.85), which covers
+   paper balls below the sonar beam. Near the end each step covers at most 60% of the remaining
+   room, so a step that runs long (battery, floor) still stops short of the sample; the test
+   suite checks steps 40% longer than calibrated never get closer than 10 cm. A blue obstacle in
+   the path stops the search.
 3. **Not found → explore.** Turn to the heading with the most ultrasonic room from the scan and
    drive forward in steps of up to 15 cm, checking the camera and sonar between steps, until the
    sonar is within `navigation.wall_distance_cm` (25 cm) of a wall or a blue obstacle is ahead.
