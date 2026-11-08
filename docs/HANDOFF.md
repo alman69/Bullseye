@@ -43,8 +43,8 @@ MPU6050, ultrasonic sensor and camera on one pan servo, and RGB LEDs.
 relays JSON commands to the UNO over UART. The UNO runs the motors and sensors. Firmware is the
 unmodified ELEGOO factory code.
 
-**Arena (current):** white floor, unpainted brown cardboard walls, painted blocks (colors and
-roles still to be decided, see §8).
+**Arena:** white floor, unpainted brown cardboard walls, painted mineral blocks, and colored
+obstacles. A floodlight will be added later. See the palette in §8.
 
 ## 2. Who owns what
 
@@ -218,10 +218,51 @@ Integration to-dos:
   - the app computes the HSV ranges, handling red's wrap-around automatically
   - it prints an overlap table against the other colors, the floor and the cardboard
   - after calibrating, consider locking the camera's white balance via `/control`
-- **[Open]** Which painted block colors are targets (rocks) and which are obstacles?
 - **[Open]** Who does the UNO firmware motion timeout, and is flashing allowed?
 - **[Open]** Which laptop runs the demo? It needs Python 3.13 and Node 22+ for Mission Control,
   plus the vision dependencies, installed **before** joining the rover's internet-less Wi-Fi.
+
+### Arena color palette [Planned, 2026-11-07]
+
+| Item | Color | Approx. OpenCV hue (0–179) | Notes |
+|---|---|---|---|
+| Mineral 1 | **Red** block (primary red; not orange-red or pink) | 0–8 and 172–179 | Existing painted block |
+| Mineral 2 | **Green** block (kelly/grass green; not lime or teal) | 50–75 | To paint |
+| Mineral 3 | **Blue** block (royal/primary blue; not navy or sky) | 105–120 | To paint |
+| Obstacles | **Yellow** (lemon; not golden or orange) | 25–32 | Existing yellow block, or yellow crumpled paper (see below) |
+| Walls | Plain cardboard, unpainted | ~10–20, medium saturation | Must not be white, or the floor check can't see them |
+| Floor | Matte white | any hue, very low saturation | Keep it clean; no tape lines |
+
+Why this palette:
+- Red, green and blue are the furthest apart on the hue scale (60 units each) and already match
+  Mission Control's colors and the RGB LEDs.
+- Yellow is closest to cardboard, but confusing an obstacle with a wall is harmless (both mean
+  "avoid").
+- With floor-based avoidance, *anything* that is neither floor nor the current target is treated
+  as an obstacle, including the minerals not being searched for.
+
+**Avoid** orange or brown (between red, yellow and cardboard), pink, magenta or purple (too close
+to red or dark blue), cyan or teal (between green and blue), white or light gray (looks like floor),
+and black (looks like shadow).
+
+**Painting:** matte paint, every side the same color, no logos or stripes. Test one patch of each
+paint through the camera before painting everything.
+
+**Crumpled-paper obstacles:** they work with the camera, but follow these rules:
+- **Saturated colored paper**, colored on both sides (for example yellow construction paper).
+  Never white printer paper.
+- **Crumple loosely into a rounded lump.** Tight creases create glare spots that look like white
+  floor, plus dark shadows that break up the color.
+- **At least ~10 cm across.**
+- **Weighted inside** (a coin or a small stone) so it doesn't move when bumped or blown.
+- **Don't count on the ultrasonic sensor for them:** paper scatters sound and low lumps can sit
+  below the beam, so the camera floor check is what avoids them. If a solid echo matters, wrap
+  yellow paper smoothly around a small box or cup instead.
+
+**Floodlight:** prefer a neutral or daylight LED (about 5000 K or higher), mounted high and angled
+down, never pointing at the camera. Check for flicker banding on video. Do the final color
+calibration and any white-balance lock **under the floodlight**, and keep a room-light backup
+config (`main.py --config <file>`).
 
 ## 9. Practical gotchas
 
