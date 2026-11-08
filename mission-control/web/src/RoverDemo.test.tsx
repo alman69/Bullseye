@@ -180,7 +180,7 @@ it("restores pilot scooper controls without enabling rover driving", () => {
 it("keeps driving enabled during the manual pickup and offers delivery confirmation", async () => {
   state.bench!.armed = true;
   state.bench!.arm_token = "tok";
-  state.bench!.auto = { state: "manual_pickup", message: "Stopped about 15 cm away.", target: "red", run_id: "pickup-run" };
+  state.bench!.auto = { state: "manual_pickup", message: "Stopped about 20 cm away.", target: "red", run_id: "pickup-run" };
   render(<RoverDemo />);
   expect(screen.getByRole("button", { name: "Step forward" }).hasAttribute("disabled")).toBe(false);
   const home = screen.getByRole("button", { name: "Delivered to home base" });

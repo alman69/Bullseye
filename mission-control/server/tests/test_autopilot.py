@@ -191,7 +191,7 @@ def test_turn_and_forward_tables_round_trip(vision):
 def test_mission_scans_approaches_and_stops_10_cm_away(vision):
     world, reports = SonarWorld(vision), []
     assert asyncio.run(world.drive(Autopilot(world, vision, reports_of(reports)).mission("red")))
-    assert 15 <= world.cm <= 18                                     # about 15 cm, within one small step
+    assert 20 <= world.cm <= 23                                     # about 20 cm, within one small step
     assert world.leds == [(255, 0, 0), (0, 255, 0)]
     assert reports[-1] == "manual_pickup" and "approaching" in reports
     assert vision.target == "red"
@@ -209,14 +209,14 @@ def test_never_gets_closer_than_10_cm_even_if_steps_run_long(vision, overshoot):
 
     world = LongSteps(vision)
     assert asyncio.run(world.drive(Autopilot(world, vision).find("red")))
-    assert world.closest >= 15 and world.cm <= 20
+    assert world.closest >= 20 and world.cm <= 25
 
 
 def test_stop_buffer_is_configurable(vision):
     vision.cfg["navigation"]["stop_buffer_cm"] = 3
     world = SonarWorld(vision)
     assert asyncio.run(world.drive(Autopilot(world, vision).find("red")))
-    assert 18 <= world.cm <= 21                                     # 15 cm + 3 cm extra leeway
+    assert 23 <= world.cm <= 26                                     # 20 cm + 3 cm extra leeway
 
 
 def test_off_center_target_is_centered_before_driving(vision):
@@ -249,7 +249,7 @@ def test_sample_hidden_behind_a_wall_is_found_with_only_one_360(vision):
     pilot = Autopilot(world, vision, lambda state, message: messages.append((state, message)))
     assert asyncio.run(world.drive(pilot.find("red")))
     distance, _ = world._sample()
-    assert 14 <= distance <= 20                                     # stopped about 15 cm from it, never touching
+    assert 19 <= distance <= 25                                     # stopped about 20 cm from it, never touching
     first_explore = next(i for i, (state, _) in enumerate(messages) if state == "relocating")
     assert not any("/360°" in message for _, message in messages[first_explore:])   # never a second 360
     assert any("Wall ahead" in message for _, message in messages)  # it checked the sides at the wall
@@ -303,7 +303,7 @@ def test_far_approach_uses_long_steps_then_short_ones(vision):
     assert asyncio.run(world.drive(Autopilot(world, vision).find("red")))
     forward = [ms for d, ms in world.steps if d == "forward"]
     assert forward[0] == 1000 and forward[-1] < 1000                # 15 cm steps when far, smaller at the end
-    assert len(forward) <= 8                                        # 80 cm → 15 cm in a handful of steps
+    assert len(forward) <= 8                                        # 80 cm → 20 cm in a handful of steps
 
 
 def test_no_echo_never_counts_as_open_space(vision):

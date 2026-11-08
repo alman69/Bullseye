@@ -24,7 +24,7 @@ with no GitHub publishing. Check the actual branch/log for completion status.
 - **2026-11-08 rewrite (`feature/simple-autopilot`):** the old pathfinding and the vision dry-run
   planner (`planner.py`) are gone. The new `autopilot.py` loop: one 360° scan → if not found, drive
   toward the heading with the most ultrasonic room; at a wall check left/right by sonar and take
-  the more open side (never a second 360) → once found, approach to about 15 cm → stop and hand the rover to the pilot, who drives up, squeezes, drives home and presses
+  the more open side (never a second 360) → once found, approach to about 20 cm → stop and hand the rover to the pilot, who drives up, squeezes, drives home and presses
   Delivered. `/bench` now connects, reconnects and enables controls by itself; STOP still halts
   everything (`BULLSEYE_BENCH_AUTO=0` restores the manual Claim/Connect/Enable flow).
   See [AUTONOMY_PLAN.md](AUTONOMY_PLAN.md).
@@ -71,7 +71,7 @@ reports below are historical unless updated explicitly. **Restart the server aft
 **Mission:**
 1. A user chooses red or green ore in Mission Control.
 2. The rover scans 360° once, then explores toward the most open direction (ultrasonic), checking left/right at walls.
-3. It approaches the selected target to about 15 cm, stops, and hands over to manual driving.
+3. It approaches the selected target to about 20 cm, stops, and hands over to manual driving.
 4. The pilot drives up manually and squeezes the gripper to grab it.
 5. The pilot drives it to home base and presses Delivered. The rover never returns automatically.
 
@@ -257,7 +257,7 @@ Separate: BLE sender reads the cached /api/bench/state → ESP32-S3 display
 1. Open `/bench`; the page claims the pilot seat and the server connects and enables controls. Select ruby or emerald.
 2. Start the search. The rover scans through a measured 360° turn. If absent, it turns to the
    heading with the most ultrasonic room and explores; at a wall it checks left/right and takes the more open side.
-3. On a stable target, align and approach to about 15 cm (sonar or camera). Stop and hand over;
+3. On a stable target, align and approach to about 20 cm (sonar or camera). Stop and hand over;
    green LEDs and the happy display signal arrival. Driving stays enabled.
 4. Drive up manually, squeeze to grab it, drive it home and press Delivered.
    Manual driving can be enabled separately after pickup if the rover also needs moving.

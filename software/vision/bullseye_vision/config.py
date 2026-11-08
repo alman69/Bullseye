@@ -80,7 +80,7 @@ DEFAULTS: dict = {
         "camera_latency_s": 0.15,
         "wall_distance_cm": 25,
         "arrive_bottom_y": 0.85,        # autopilot: sample's bottom edge this low = right in front
-        "stop_buffer_cm": 0,            # autopilot: extra leeway on top of the 15 cm stop
+        "stop_buffer_cm": 0,            # autopilot: extra leeway on top of the 20 cm stop
         "decision_period_s": 0.5,
         "arrival_mode": "camera",
         "approach_zone_y": 0.08,
