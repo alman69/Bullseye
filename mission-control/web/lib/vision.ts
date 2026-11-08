@@ -82,7 +82,7 @@ export type VisionOverlayOptions = {
   onSampleBox?: (box: [number, number, number, number]) => void;
 };
 
-export const VISION_TARGETS = ["red", "green", "blue", "yellow"] as const;
+export const VISION_TARGETS = ["red", "green", "blue", "yellow", "black"] as const;
 
 /** Special "sampling class": dragging adds a rover-mask box instead of color samples. */
 export const MASK_TOOL = "__rover_mask__";
@@ -103,10 +103,12 @@ export const SAMPLE_CLASSES: { id: string; label: string; hex: string; key: stri
   { id: "cardboard", label: "Cardboard", hex: "#c0925e", key: "6" },
   { id: "obstacle", label: "Obstacle", hex: "#ff9a3d", key: "7" },
 ];
+export const FLAG_HEX = "#8b93a1";
 
-export const CLASS_HEX: Record<string, string> = Object.fromEntries(
-  SAMPLE_CLASSES.map((c) => [c.id, c.hex]),
-);
+export const CLASS_HEX: Record<string, string> = {
+  ...Object.fromEntries(SAMPLE_CLASSES.map((c) => [c.id, c.hex])),
+  black: FLAG_HEX,
+};
 
 export const TUNING: { key: string; label: string; min: number; max: number; step: number; hint: string }[] = [
   { key: "floor.s_max", label: "Floor: max saturation", min: 0, max: 120, step: 1, hint: "Raise if floor shows as blocked; lower if cardboard counts as floor." },
@@ -116,6 +118,7 @@ export const TUNING: { key: string; label: string; min: number; max: number; ste
   { key: "navigation.aim_deadband", label: "Centered within", min: 0.02, max: 0.4, step: 0.01, hint: "Fraction of half the image counted as CENTER." },
   { key: "navigation.arrive_distance_cm", label: "Stop distance (cm)", min: 2, max: 60, step: 1, hint: "Moves the stop line once the ground is calibrated." },
   { key: "navigation.approach_zone_y", label: "Approach zone height", min: 0, max: 0.3, step: 0.01, hint: "Band above the stop line with tiny steps." },
+  { key: "black.v_max", label: "Black flag: max brightness", min: 10, max: 150, step: 5, hint: "Raise if the flag isn't detected; lower if dark corners count as the flag." },
   { key: "navigation.search_turn_ms", label: "Search turn (ms)", min: 100, max: 1000, step: 100, hint: "Measured: 1000 ms ≈ 49° at PWM 60." },
   { key: "navigation.avoid_turn_ms", label: "Avoid turn (ms)", min: 100, max: 1000, step: 100, hint: "Turn used to go around obstacles." },
 ];

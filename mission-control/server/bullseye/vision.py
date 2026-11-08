@@ -45,7 +45,9 @@ TUNABLE = {
     "navigation.approach_zone_y": (float, 0.0, 0.3),
     "navigation.search_turn_ms": (int, 100, 1000),
     "navigation.avoid_turn_ms": (int, 100, 1000),
+    "black.v_max": (int, 10, 150),          # the home-base black flag: max brightness counted as "black"
 }
+TARGETS = ("red", "green", "blue", "yellow", "black")
 # Camera sensor settings sent to the ESP32's /control endpoint (runtime only, reset on power-off;
 # no firmware change). Under the floodlight: more saturation and less exposure keep colors visible.
 CAMERA_CONTROLS = {"saturation": (-2, 2), "ae_level": (-2, 2), "brightness": (-2, 2), "contrast": (-2, 2)}
@@ -281,6 +283,8 @@ class VisionService:
         }
 
     def _get(self, dotted: str):
+        if dotted == "black.v_max":
+            return self.cfg["colors"].get("black", {"v": [0, 60]})["v"][1]
         section, key = dotted.split(".")
         return self.cfg[section][key]
 
@@ -305,8 +309,8 @@ class VisionService:
 
     def _cmd_target(self, p):
         color = p.get("color")
-        if color not in ("red", "green", "blue", "yellow"):
-            raise CommandError("Choose red, green, blue or yellow.")
+        if color not in TARGETS:
+            raise CommandError("Choose red, green, blue, yellow or black.")
         self.target = color
         self.nav.reset()
 
@@ -474,6 +478,12 @@ class VisionService:
         kind, lo, hi = TUNABLE[key]
         if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or not lo <= value <= hi:
             raise CommandError(f"{key} must be between {lo} and {hi}.")
+        if key == "black.v_max":
+            black = self.cfg["colors"].setdefault("black", {"h": [0, 179], "s": [0, 255], "v": [0, 60]})
+            black["v"] = [0, kind(value)]
+            self._reload()
+            self.message = f"Black flag: brightness up to {kind(value)}"
+            return
         section, name = key.split(".")
         self.cfg[section][name] = kind(value)
         if key == "navigation.arrive_distance_cm" and len(self.cfg["ground"].get("points") or []) >= 2:
