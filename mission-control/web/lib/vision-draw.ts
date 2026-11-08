@@ -1,4 +1,4 @@
-import { CLASS_HEX, normalizedBox, type VisionFrame, type VisionOverlayOptions } from "@/lib/vision";
+import { CLASS_HEX, MASK_TOOL, normalizedBox, type VisionFrame, type VisionOverlayOptions } from "@/lib/vision";
 
 const ARROWS: Record<string, [number, number]> = {
   forward: [0, -1],
@@ -67,6 +67,18 @@ export function drawVision(
       ctx.stroke();
       ctx.setLineDash([]);
       if (!f.free.floor_visible) label("NO FLOOR VISIBLE", 12, top - 8, "#ff8080");
+    }
+
+    // Rover mask: parts of the rover itself (gripper) that vision ignores.
+    for (const [x0, y0, x1, y1] of f.mask_boxes ?? []) {
+      ctx.fillStyle = "rgba(20,20,30,0.45)";
+      ctx.fillRect(x0 * w, y0 * h, (x1 - x0) * w, (y1 - y0) * h);
+      ctx.strokeStyle = "rgba(255,255,255,0.55)";
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x0 * w, y0 * h, (x1 - x0) * w, (y1 - y0) * h);
+      ctx.setLineDash([]);
+      label("ignored", x0 * w + 6, y0 * h + font, "rgba(255,255,255,0.8)");
     }
 
     // Ground lines from the stop-line calibration.
@@ -143,7 +155,7 @@ export function drawVision(
     const box = normalizedBox(drag.start, drag.end);
     ctx.setLineDash([5, 4]);
     ctx.lineWidth = 2;
-    ctx.strokeStyle = CLASS_HEX[o.samplingClass] ?? "#ffffff";
+    ctx.strokeStyle = o.samplingClass === MASK_TOOL ? "#ffffff" : CLASS_HEX[o.samplingClass] ?? "#ffffff";
     ctx.strokeRect(box[0] * w, box[1] * h, (box[2] - box[0]) * w, (box[3] - box[1]) * h);
     ctx.setLineDash([]);
   }

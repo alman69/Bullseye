@@ -80,6 +80,7 @@ DEFAULTS: dict = {
         "stop_line_y": None,
         "size_tolerance": 2.0,
     },
+    "rover_mask": {"boxes": []},
     "classifier": {
         "mode": "auto",
         "model_path": "color_model.json",

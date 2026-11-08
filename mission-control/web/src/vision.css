@@ -277,3 +277,13 @@
     min-width: 440px;
   }
 }
+
+.vision-warning {
+  margin: 0;
+  padding: 8px 11px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  background: rgba(235, 70, 70, 0.14);
+  border: 1px solid rgba(235, 70, 70, 0.5);
+  color: #ffd2cc;
+}
