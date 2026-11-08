@@ -181,11 +181,11 @@ class SonarWorld(World):
         return True
 
 
-def test_collect_stops_at_20_cm_by_ultrasonic_and_turns_leds_green(vision):
+def test_collect_stops_at_10_cm_by_ultrasonic_and_turns_leds_green(vision):
     world, reports = SonarWorld(vision), []
     pilot = Autopilot(world, vision, lambda state, message: reports.append(state))
     assert asyncio.run(world.drive(pilot.collect("red")))
-    assert 20 <= world.cm < 22.7                                     # at 20 cm, within one smallest step
+    assert 10 <= world.cm < 12.7                                     # at 10 cm, within one smallest step
     assert world.leds == [(255, 0, 0), (0, 255, 0)] and reports[-1] == "collected"
 
 

@@ -41,7 +41,7 @@ export function AutopilotPanel({
       </div>
       <div className="vision-body">
         <p className="vision-help">
-          Pick the mineral and press <b>Run mission</b>: the rover finds it, stops 20 cm away (LEDs turn green, “Sample
+          Pick the mineral and press <b>Run mission</b>: the rover finds it, stops 10 cm away (LEDs turn green, “Sample
           collected”), turns 180° and drives to the black flag, stopping 15 cm from the wall (“Sample deposited”, LEDs back
           to red). If it can’t see a target it keeps exploring open floor. Blue = obstacles. STOP cancels at any time.
         </p>

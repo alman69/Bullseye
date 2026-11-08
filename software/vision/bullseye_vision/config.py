@@ -55,7 +55,7 @@ DEFAULTS: dict = {
         "slow_forward_ms": 150,
         "slow_area_ratio": 0.04,
         "arrive_area_ratio": 0.08,
-        "arrive_distance_cm": 20,
+        "arrive_distance_cm": 10,
         "emergency_distance_cm": 10,
         "distance_check_every": 3,
         "lost_decisions": 3,

@@ -103,6 +103,7 @@ def test_sample_validation(vision_dir):
 
 def test_ground_calibration_from_captures(vision_dir):
     svc = service(vision_dir)
+    run(svc, "vision_tune", {"key": "navigation.arrive_distance_cm", "value": 20})   # independent of the arena config
     with pytest.raises(CommandError):
         run(svc, "vision_ground_fit")
     for dist, bottom, size in ((10, 580, 90), (15, 500, 60), (20, 460, 45), (30, 420, 30)):

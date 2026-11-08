@@ -18,10 +18,10 @@ Deliberately simple for the hackathon demo:
     including frames taken while the rover was moving. If the target flashed into view during a
     move but isn't in the decision frame, it turns back to where it was seen (estimated from the
     step table and when, during the turn, the frame was taken) and looks again twice.
-  * Arrival: the target is centered and the ultrasonic reads the stop distance (20 cm for a
+  * Arrival: the target is centered and the ultrasonic reads the stop distance (10 cm for a
     mineral, 15 cm from the wall for the black home flag); forward steps are shortened so they
-    never overshoot it. For minerals the camera size check still works too (whichever comes
-    first), for paper balls below the ultrasonic beam. The flag is on a wall, so for black the
+    never overshoot it. For minerals the camera "looks big enough" check only counts when the
+    ultrasonic can't see the object (no echo or far reading: a ball below the beam). The flag is on a wall, so for black the
     floor check only counts obstacle colors (the wall itself is the destination).
   * LEDs: red while working, green once a sample is collected, red again after it's deposited.
   * STOP on /bench cancels the task immediately; the step in progress still ends with a STOP.
@@ -138,6 +138,21 @@ class Autopilot:
             return planner._move("forward", fitting[-1], f"Ultrasonic {distance:.0f} cm: shorter step to stop at {stop_cm:.0f} cm.")
         return action
 
+    async def _confirm_size_arrival(self, color: str, planner, action):
+        """The camera says "looks big enough". If the ultrasonic can see the object (a reading a little
+        beyond the stop distance), keep creeping to the stop distance instead. If it reads far or no
+        echo, the object is below the beam: trust the camera."""
+        distance = await self._wall_distance()
+        stop_cm = self._stop_cm(color, planner)
+        if distance is None or distance <= 0 or distance > stop_cm + 15:
+            return action
+        room = distance - stop_cm
+        fitting = [ms for ms, cm in planner.forward_table if cm <= room]
+        if room <= 0 or not fitting:
+            return planner._action("arrived", f"Target centered, ultrasonic {distance:.0f} cm (stop at {stop_cm:.0f} cm).")
+        planner._enter("APPROACH")
+        return planner._move("forward", fitting[-1], f"Looks close; ultrasonic {distance:.0f} cm: creeping to {stop_cm:.0f} cm.")
+
     # ------------------------------------------------------------ behaviors
     async def _wall_distance(self):
         """Fresh ultrasonic reading in cm, or None if unknown (no echo or sensor unavailable)."""
@@ -186,6 +201,8 @@ class Autopilot:
                 action = planner.decide(det, free if use_floor else None, None, camera_ok=True)
             if action.kind == "forward" and action.state == "APPROACH":
                 action = await self._ultrasonic_arrival(color, planner, action)
+            elif action.kind == "arrived" and color != "black":
+                action = await self._confirm_size_arrival(color, planner, action)
             elif action.kind == "forward" and action.state in ("EXPLORE", "AVOID"):
                 distance = await self._wall_distance()
                 limit = planner.s.wall_distance_cm
