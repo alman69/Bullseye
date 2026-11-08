@@ -70,6 +70,7 @@ export type VisionSummary = {
   steps?: { forward: Record<string, number>; turn: Record<string, number> };
   tuning?: Record<string, number>;
   hsv?: Record<string, { h: number[]; s: number[]; v: number[] }>;
+  hsv_undo?: number;
 };
 
 export type MaskView = "off" | "target" | "floor";
@@ -89,6 +90,8 @@ export const NAV_TARGETS = ["red", "green", "blue", "black"] as const;
 
 /** Special "sampling class": dragging adds a rover-mask box instead of color samples. */
 export const MASK_TOOL = "__rover_mask__";
+/** Special "sampling class" prefix: dragging teaches that color's HSV range ("__hsv__:green"). */
+export const HSV_TOOL = "__hsv__:";
 
 export const CAMERA_TUNING: { key: string; label: string; hint: string }[] = [
   { key: "saturation", label: "Color saturation", hint: "Under the floodlight, +2 brings washed-out colors back." },

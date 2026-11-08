@@ -85,6 +85,7 @@ class VisionService:
         self.confusion: dict | None = None
         self.ground_captures: list = []         # [{"distance_cm", "bottom_y", "width"}]
         self.fov_captures: dict = {}            # {"center": error, "side": error}
+        self._hsv_undo: list = []               # [(color, previous range)] for "Undo" in the HSV tab
         self._times: deque = deque(maxlen=30)
         self._last_frame_at = 0.0
         self._camera_busy = False
@@ -281,6 +282,7 @@ class VisionService:
             "steps": self.cfg["navigation"].get("steps", {"forward": {}, "turn": {}}),
             "tuning": {key: self._get(key) for key in TUNABLE},
             "hsv": {c: self.cfg["colors"][c] for c in TARGETS if c in self.cfg["colors"]},
+            "hsv_undo": len(self._hsv_undo),
         }
 
     def _get(self, dotted: str):
@@ -510,6 +512,76 @@ class VisionService:
         self.cfg["colors"][color] = clean
         self._reload()
         self.message = f"HSV {color}: H {clean['h']} S {clean['s']} V {clean['v']}"
+
+    # Which pixels inside a taught box count as the color ("the green-looking ones"), so a box
+    # that also covers some floor or wall doesn't teach those. (H low, H high, S min); red wraps.
+    TEACH_FAMILY = {"red": (165, 12, 50), "yellow": (15, 40, 60), "green": (30, 95, 30), "blue": (85, 140, 30)}
+
+    def _cmd_hsv_teach(self, p):
+        """Widen one color's HSV range so it covers the color inside a box dragged on the video."""
+        import cv2
+        import numpy as np
+        color = p.get("color")
+        if color not in TARGETS:
+            raise CommandError("Choose red, green, blue, yellow or black.")
+        self._need_frame()
+        x0, y0, x1, y1 = self._box(p)
+        image = self._image
+        hgt, wid = image.shape[:2]
+        hsv = self.detector.to_hsv(image)
+        crop = hsv[int(y0 * hgt):max(int(y1 * hgt), int(y0 * hgt) + 1), int(x0 * wid):max(int(x1 * wid), int(x0 * wid) + 1)]
+        px = crop.reshape(-1, 3).astype(int)
+        H, S, V = px[:, 0], px[:, 1], px[:, 2]
+        if color == "black":
+            keep = V <= min(110, int(np.percentile(V, 60)))          # the darkest part of the box: the flag
+        else:
+            h0, h1, s_min = self.TEACH_FAMILY[color]
+            in_hue = (H >= h0) | (H <= h1) if h0 > h1 else (H >= h0) & (H <= h1)
+            keep = in_hue & (S >= s_min)
+        sel = px[keep]
+        if len(sel) < 30:
+            raise CommandError(f"Couldn't find {color} in that box. Drag a tighter box right on the {color} object.")
+
+        old = {k: list(v) for k, v in self.cfg["colors"][color].items()}
+        new = {"s": [min(old["s"][0], int(np.percentile(sel[:, 1], 5))), max(old["s"][1], int(np.percentile(sel[:, 1], 95)))],
+               "v": [min(old["v"][0], int(np.percentile(sel[:, 2], 5))), max(old["v"][1], int(np.percentile(sel[:, 2], 95)))]}
+        h0, h1 = old["h"]
+        if color == "black":
+            new["h"] = [h0, h1]
+        elif h0 > h1:                                                  # red: unwrap hue around 180
+            hues = np.where(sel[:, 0] < 90, sel[:, 0] + 180, sel[:, 0])
+            lo, hi = min(h0, int(np.percentile(hues, 5))), max(h1 + 180, int(np.percentile(hues, 95)))
+            new["h"] = [lo % 180 if lo >= 180 else lo, hi - 180 if hi >= 180 else hi]
+            if hi - lo >= 179:
+                new["h"] = [0, 179]
+        else:
+            new["h"] = [min(h0, int(np.percentile(sel[:, 0], 5))), max(h1, int(np.percentile(sel[:, 0], 95)))]
+        if new == old:
+            self.message = f"{color} already covers that box. No change."
+            return
+        self._hsv_undo.append((color, old))
+        del self._hsv_undo[:-10]
+        self.cfg["colors"][color] = new
+        self._reload()
+
+        # How much the new range now matches outside the box (in view, not the rover): too much = undo.
+        mask = self.detector.mask(image, color) > 0
+        inside = np.zeros(mask.shape, bool)
+        inside[int(y0 * hgt):int(y1 * hgt) + 1, int(x0 * wid):int(x1 * wid) + 1] = True
+        rover = self.detector.ignore_mask(image.shape)
+        outside = ~inside if rover is None else (~inside & (rover == 0))
+        spill = 100.0 * mask[outside].mean() if outside.any() else 0.0
+        warn = " That's a lot: undo and drag a tighter box." if spill > 3 else ""
+        self.message = (f"Taught {color}: H {new['h']} S {new['s']} V {new['v']}. "
+                        f"It now also matches {spill:.1f}% of the rest of the view.{warn}")
+
+    def _cmd_hsv_undo(self, p):
+        if not self._hsv_undo:
+            raise CommandError("Nothing to undo.")
+        color, old = self._hsv_undo.pop()
+        self.cfg["colors"][color] = old
+        self._reload()
+        self.message = f"Undid the last {color} change: H {old['h']} S {old['s']} V {old['v']}."
 
     def _cmd_camera(self, p):
         key, value = p.get("key"), p.get("value")

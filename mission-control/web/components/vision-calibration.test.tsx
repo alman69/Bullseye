@@ -98,6 +98,17 @@ describe("VisionCalibration", () => {
     expect(act).toHaveBeenCalledWith("vision_hsv", { color: "red", h: [176, 10], s: [120, 255], v: [70, 255] });
   });
 
+  it("teaches a color by dragging on the video, with undo", () => {
+    const act = vi.fn().mockResolvedValue(true);
+    const u = ui();
+    render(<VisionCalibration vision={{ ...summary, mode: "hsv", hsv_undo: 1, hsv: { red: { h: [176, 10], s: [100, 255], v: [70, 255] } } }} ui={u} canAct act={act} />);
+    fireEvent.click(screen.getByRole("tab", { name: /HSV colors/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Teach red from video" }));
+    expect(u.setSamplingClass).toHaveBeenCalledWith("__hsv__:red");
+    fireEvent.click(screen.getByRole("button", { name: "Undo last change" }));
+    expect(act).toHaveBeenCalledWith("vision_hsv_undo");
+  });
+
   it("warns when samples exist but no model is fitted", () => {
     render(<VisionCalibration vision={{ ...summary, model_fitted: false }} ui={ui()} canAct act={vi.fn()} />);
     fireEvent.click(screen.getByRole("tab", { name: /Classifier/ }));

@@ -1,4 +1,4 @@
-import { CLASS_HEX, MASK_TOOL, normalizedBox, type VisionFrame, type VisionOverlayOptions } from "@/lib/vision";
+import { CLASS_HEX, HSV_TOOL, MASK_TOOL, normalizedBox, type VisionFrame, type VisionOverlayOptions } from "@/lib/vision";
 
 const ARROWS: Record<string, [number, number]> = {
   forward: [0, -1],
@@ -155,7 +155,8 @@ export function drawVision(
     const box = normalizedBox(drag.start, drag.end);
     ctx.setLineDash([5, 4]);
     ctx.lineWidth = 2;
-    ctx.strokeStyle = o.samplingClass === MASK_TOOL ? "#ffffff" : CLASS_HEX[o.samplingClass] ?? "#ffffff";
+    const cls = o.samplingClass.startsWith(HSV_TOOL) ? o.samplingClass.slice(HSV_TOOL.length) : o.samplingClass;
+    ctx.strokeStyle = cls === MASK_TOOL ? "#ffffff" : CLASS_HEX[cls] ?? "#ffffff";
     ctx.strokeRect(box[0] * w, box[1] * h, (box[2] - box[0]) * w, (box[3] - box[1]) * h);
     ctx.setLineDash([]);
   }
