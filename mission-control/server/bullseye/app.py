@@ -134,6 +134,8 @@ def create_app(settings: Settings | None = None, *, bench_bridge=None):
                             raise CommandError("Vision is not running on this server.")
                         if controller.pilot != session_id:
                             raise CommandError("Claim pilot controls first.")
+                        if bench and bench.operation is not None:
+                            raise CommandError("Stop rover motion before changing vision or calibration.")
                         await vision.command(command.type, command.payload)
                         controller.publish()
                     else:

@@ -12,7 +12,7 @@ import numpy as np
 OBJECTS = ("red", "green", "blue", "yellow", "cardboard", "home")
 CLASSES = OBJECTS + ("floor",)
 HOME_MAX_VALUE = 40  # near-black only, even for previously saved broad profiles
-HOME_MAX_SATURATION = 80
+HOME_MAX_CHROMA = 12  # max(B,G,R) - min(B,G,R); HSV saturation is unstable near black
 # OpenCV HSV units. Background materials compete with objects, never count as them.
 DEFAULT_PROFILES = {
     "red": ([0, 215, 175], [12, 100, 115]),
@@ -20,7 +20,7 @@ DEFAULT_PROFILES = {
     "blue": ([112, 215, 160], [22, 100, 110]),
     "yellow": ([28, 215, 205], [10, 105, 90]),
     "cardboard": ([18, 110, 155], [12, 85, 100]),
-    "home": ([0, 0, 20], [90, HOME_MAX_SATURATION, 20]),
+    "home": ([0, 0, 20], [90, 255, 20]),
     "floor": ([0, 15, 215], [90, 60, 125]),
 }
 
@@ -46,7 +46,7 @@ def fit_patch(pixels: np.ndarray, name: str) -> dict:
     spread = np.percentile(delta, 90, axis=0)
     if name in OBJECTS[:4] and (center[1] < 35 or center[2] < 20):
         raise ValueError("That patch is too gray or dark. Click the colored surface away from glare/shadow.")
-    if name == "home" and (center[2] > HOME_MAX_VALUE or center[1] > HOME_MAX_SATURATION):
+    if name == "home" and (center[2] > HOME_MAX_VALUE or np.median(pixels.max(axis=1) - pixels.min(axis=1)) > HOME_MAX_CHROMA):
         raise ValueError("Home base requires near-black: choose a neutral black patch, not a gray shadow or colored surface.")
     if name not in ("home", "floor") and spread[0] > 18:
         raise ValueError("That patch mixes colors. Select a smaller area inside one material.")
@@ -54,7 +54,7 @@ def fit_patch(pixels: np.ndarray, name: str) -> dict:
     if name in ("floor", "home"):
         center[0], scale[0] = 0, 90
     if name == "home":
-        scale[1] = min(float(scale[1]), 30)
+        center[1], scale[1] = 0, 255  # near-black neutrality uses absolute channel spread
         scale[2] = float(np.clip(spread[2] * 1.6 + 6, 8, 14))
     return {"center": [round(float(x), 3) for x in center],
             "scale": [round(float(x), 3) for x in scale], "pixels": int(len(pixels))}
@@ -81,7 +81,7 @@ class ArenaPalette:
         labels = self._lut[hsv[..., 0], hsv[..., 1] >> 2, hsv[..., 2] >> 2].copy()
         # Exact guard also applies to old saved profiles and lookup-bin boundaries.
         labels[(labels == self.index("home")) &
-               ((hsv[..., 2] > HOME_MAX_VALUE) | (hsv[..., 1] > HOME_MAX_SATURATION))] = -1
+               ((hsv[..., 2] > HOME_MAX_VALUE) | ((bgr.max(axis=2) - bgr.min(axis=2)) > HOME_MAX_CHROMA))] = -1
         return labels
 
     def _labels_hsv(self, hsv):
@@ -98,10 +98,12 @@ class ArenaPalette:
                 d[..., 0] = np.abs(hue_delta(hsv[..., 0], center[0]))
                 if name in ("home", "floor"):
                     d[..., 0] = 0
+                if name == "home":
+                    d[..., 1] = 0  # valid even for old S=255, V≈0 black calibration
                 d /= scale
                 valid = np.max(d, axis=2) <= 1
                 if name == "home":
-                    valid &= (hsv[..., 2] <= HOME_MAX_VALUE) & (hsv[..., 1] <= HOME_MAX_SATURATION)
+                    valid &= (hsv[..., 2] <= HOME_MAX_VALUE) & (hsv[..., 1] * hsv[..., 2] / 255 <= HOME_MAX_CHROMA)
                 elif name in OBJECTS[:4]:
                     valid &= hsv[..., 2] >= 20
                 # Hue carries most identity for colors; brightness still separates yellow/cardboard.

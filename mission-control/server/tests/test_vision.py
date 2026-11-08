@@ -104,6 +104,7 @@ def test_sample_validation(vision_dir):
 
 def test_ground_calibration_from_captures(vision_dir):
     svc = service(vision_dir)
+    svc.cfg["navigation"]["arrive_distance_cm"] = 20  # this fixture's measured stop line
     with pytest.raises(CommandError):
         run(svc, "vision_ground_fit")
     for dist, bottom, size in ((10, 580, 90), (15, 500, 60), (20, 460, 45), (30, 420, 30)):
@@ -201,16 +202,16 @@ def test_api_feed_commands_and_state(vision_dir):
                     if message["type"] == "ack" and message["id"] == rid:
                         return message
 
-            assert ack("vision_target", {"color": "blue"}, "a")["status"] == "rejected"   # not pilot
+            assert ack("vision_target", {"color": "green"}, "a")["status"] == "rejected"   # not pilot
             assert ack("claim", rid="b")["status"] == "accepted"
-            assert ack("vision_target", {"color": "blue"}, "c")["status"] == "accepted"
-            assert app.state.vision.target == "blue"
-            assert ack("select_target", {"color": "yellow"}, "d")["status"] == "accepted"
-            assert app.state.vision.target == "yellow"                    # mission target drives vision
+            assert ack("vision_target", {"color": "green"}, "c")["status"] == "accepted"
+            assert app.state.vision.target == "green"
+            assert ack("select_target", {"color": "red"}, "d")["status"] == "accepted"
+            assert app.state.vision.target == "red"                    # mission target drives vision
             deadline = time.monotonic() + 3
             while time.monotonic() < deadline and not app.state.vision.summary()["detected"]:
                 time.sleep(0.05)
-            assert app.state.vision.summary()["detected"]                 # the simulator's yellow rock
+            assert app.state.vision.summary()["detected"]                 # the simulator's red rock
 
 
 def test_vision_disabled_by_default():
@@ -338,3 +339,25 @@ def test_palette_detects_all_six_simulated_materials(vision_dir):
     assert all(material["detected"] for material in result["materials"].values())
     assert result["mode"] == "palette"
     assert result["dry_run"] is True
+
+
+def test_calibration_conflict_clears_stale_undo_and_cached_pixels(vision_dir):
+    first = service(vision_dir)
+    first._process(arena(), 1)
+    frozen = first.calibration_frame()
+    run(first, "vision_palette_sample", {"cls": "red", "box": [0.48, 0.70, 0.52, 0.74], "frame_id": frozen["id"]})
+    second = service(vision_dir)
+    second._process(arena(color=(40, 180, 40)), 2)
+    green = second.calibration_frame()
+    run(second, "vision_palette_sample", {"cls": "green", "box": [0.48, 0.70, 0.52, 0.74], "frame_id": green["id"]})
+    saved = (vision_dir / "config.json").read_bytes()
+    old_prepared = first._prepared
+    with pytest.raises(CommandError, match="Reloaded calibration"):
+        run(first, "vision_palette_reset", {"cls": "red"})
+    assert first.summary()["palette"]["counts"] == {"red": 1, "green": 1}
+    assert first._prepared is not old_prepared
+    assert not first._snapshots
+    assert not first.summary()["palette"]["can_undo"]
+    with pytest.raises(CommandError, match="No color calibration to undo"):
+        run(first, "vision_palette_undo")
+    assert (vision_dir / "config.json").read_bytes() == saved

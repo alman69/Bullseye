@@ -4,6 +4,7 @@ from collections import deque
 import time
 from uuid import uuid4
 
+from .autopilot import Autopilot, AutopilotError
 from .elegoo_bench import DIRECTIONS, validate_pulse
 from .elegoo_probe import FrameParser
 from .mission import CommandError, utc_now
@@ -31,6 +32,11 @@ class FactoryBridge:
         self.waiters = {}
         self.write_lock = asyncio.Lock()
         self.io_lock = asyncio.Lock()
+        # Shield RGB LEDs: red by default, green after reaching the sample. N100 STOP clears the
+        # LEDs, so the color is re-sent after every STOP we send (only ever while stopped: an LED
+        # command during a timed N2 move would cancel the move's auto-stop).
+        self.led = (255, 0, 0)
+        self.led_dirty = True
 
     @property
     def connected(self):
@@ -132,6 +138,7 @@ class FactoryBridge:
         try:
             await self.request({"N": 100, "H": "stop"}, "{ok}", 5)
             self.last_stop_acknowledged = True
+            self.led_dirty = True
             return True
         except Exception:
             self.last_stop_acknowledged = False
@@ -147,6 +154,26 @@ class FactoryBridge:
         if self.stop_task is None or self.stop_task.done():
             self.stop_task = asyncio.create_task(self._stop())
         return await asyncio.shield(self.stop_task)
+
+    async def _send_led(self):
+        """N8 all LEDs to self.led. Call only right after an acknowledged STOP. Cosmetic: never fails."""
+        request_id = "l" + uuid4().hex[:8]
+        r, g, b = self.led
+        try:
+            await self.request({"N": 8, "D1": 0, "D2": r, "D3": g, "D4": b, "H": request_id}, "{" + request_id + "_ok}", .5)
+            self.led_dirty = False
+        except (TimeoutError, OSError, RuntimeError):
+            pass
+
+    async def set_led(self, rgb=None):
+        """Set (or re-send) the shield LED color: STOP first so it never lands during a move."""
+        async with self.io_lock:
+            if rgb is not None:
+                self.led = tuple(int(c) for c in rgb)
+            if self.writer is None or not await self.stop():
+                return False
+            await self._send_led()
+            return not self.led_dirty
 
     async def refresh_distance(self, timeout=2):
         # N21 blocks inside the UNO. Serialize it with motion transactions; held
@@ -197,6 +224,7 @@ class FactoryBridge:
     async def _pulse(self, direction, speed, duration_ms):
         if not await self.stop():
             raise ConnectionError("Preflight STOP was not acknowledged; no movement sent.")
+        await self._send_led()                      # stopped: safe to set the LEDs before moving
         request_id = "b" + uuid4().hex[:8]
         try:
             try:
@@ -209,6 +237,7 @@ class FactoryBridge:
         finally:
             if not await self.stop():
                 raise ConnectionError("Post-step STOP was not acknowledged.")
+            await self._send_led()
 
 
 class BenchControl:
@@ -238,6 +267,7 @@ class BenchControl:
         self.subscribers = set()
         self.stop_jobs = set()
         self.vision = None   # VisionService, attached by create_app when enabled
+        self.auto = {"state": "idle", "message": "Autopilot ready when controls are enabled."}
         self.log("Rover control online. Connect the bridge, then enable controls.")
 
     def log(self, message, level="info"):
@@ -255,7 +285,7 @@ class BenchControl:
             "mission_id": None, "started_at": None, "finished_at": None, "review": None,
             "collection_error": None, "capabilities": {key: False for key in ("mission", "manual", "collection", "return")},
             "rover": "connected" if self.bridge.connected else "not_connected", "camera": self.camera.status(),
-            "pilot_id": self.pilot, "led_color": None, "motion": {"linear": 0, "angular": 0},
+            "pilot_id": self.pilot, "led_color": "green" if getattr(self.bridge, "led", None) == (0, 255, 0) else "red", "motion": {"linear": 0, "angular": 0},
             "distance_cm": self.bridge.distance_cm, "last_stop_acknowledged": self.bridge.last_stop_acknowledged,
             "events": list(self.events),
             "vision": self.vision.summary() if self.vision else None,
@@ -265,7 +295,7 @@ class BenchControl:
                       "heartbeats": self.bridge.heartbeats, "max_duration_ms": 1000, "max_speed": 100,
                       "drive_mode": self.drive_mode, "hold_id": self.hold_id,
                       "distance_age_ms": distance_age, "distance_status": distance_status,
-                      "scooper": self.scooper.snapshot()},
+                      "scooper": self.scooper.snapshot(), "auto": dict(self.auto)},
         }
 
     def publish(self):
@@ -422,19 +452,62 @@ class BenchControl:
                         self.drive_mode = "step"
                         self.log(f"One {self.direction} step requested: PWM {payload['speed']}/255, {payload['duration_ms']} ms.")
                         self.launch(lambda: self.bridge.pulse(payload["direction"], payload["speed"], payload["duration_ms"]), "Step finished. STOP acknowledged in software.")
-                elif kind == "scooper_connect":
-                    self.log(f"Companion: connecting to {self.scooper.url}…")
-                    self._scooper_job(self._scooper_connect())
-                elif kind in SCOOPER_ACTIONS:
-                    # Independent of the rover controls: the pilot seat is enough.
-                    if not self.scooper.ready:
-                        raise CommandError("Connect the scooper first.")
-                    name = SCOOPER_ACTIONS[kind]
-                    self._scooper_job(self._scooper_command(name))
-                    self.log(f"Scooper: {SCOOPER_LABELS[name]} requested.")
+                elif kind == "scooper_connect" or kind in SCOOPER_ACTIONS:
+                    raise CommandError("Servo squeezing is retired on this rover. Samples are signalled by LEDs and the display.")
+                elif kind in {"auto_goto", "auto_return", "auto_mission"}:
+                    if not self.armed or not self.bridge.connected or self.stopped:
+                        raise CommandError("Connect and enable controls first.")
+                    if self.operation or self.stop_pending:
+                        raise CommandError("A step or STOP is in progress. Commands are not queued.")
+                    if payload.get("arm_token") != self.arm_token:
+                        raise CommandError("This request is outdated. Use the current controls.")
+                    if not self.vision or not self.vision.available:
+                        raise CommandError("Vision is not running, so the autopilot can't see.")
+                    avoid = True  # physical autonomous moves always use obstacle avoidance
+                    if kind in ("auto_goto", "auto_mission"):
+                        color = payload.get("color")
+                        color = "home" if color == "black" else color
+                        if color not in ("red", "green") and not (kind == "auto_goto" and color == "home"):
+                            raise CommandError("Choose a red or green sample. Blue is an obstacle.")
+                        if kind == "auto_mission":
+                            label = f"Autopilot: reach {color}, signal sample success, then return home"
+                            job = lambda pilot: pilot.mission(color, avoid=avoid)
+                        else:
+                            label = f"Autopilot: go to {color}"
+                            job = lambda pilot: pilot.go_to("home", avoid=avoid) if color == "home" else pilot.collect(color, avoid=avoid)
+                        label += " (avoiding obstacles)" if avoid else ""
+                    else:
+                        label = "Autopilot: search for the home flag and stop at base" + (" (avoiding obstacles)" if avoid else "")
+                        job = lambda pilot: pilot.return_to_base(avoid=avoid)
+                    self.direction, self.drive_mode = "auto", "auto"
+                    self.log(label + ".")
+                    self.launch(lambda: self._autopilot(job), "Autopilot finished. STOP acknowledged in software.")
                 else:
-                    raise CommandError("Unknown rover command. Autonomous missions are unavailable.")
+                    raise CommandError("Unknown rover command.")
             self.publish()
+
+    def _report(self, state, message):
+        self.auto = {"state": state, "message": message, "expression": "happy" if state == "sample_reached" else "auto"}
+        self.publish()
+
+    async def _autopilot(self, job):
+        pilot = Autopilot(self.bridge, self.vision, self._report)
+        self._report("running", "Autopilot started.")
+        try:
+            await job(pilot)
+        except asyncio.CancelledError:
+            self._report("stopped", "Autopilot stopped.")
+            raise
+        except AutopilotError as error:          # target lost etc.: stop, keep controls enabled
+            self._report("failed", str(error))
+            self.log(str(error), "warning")
+            if await self.bridge.stop() is not True:
+                self.latch("Autopilot STOP was not acknowledged. Controls disabled.")
+        except Exception:
+            self._report("failed", "Autopilot bridge action failed. STOP requested; motor state is unverified.")
+            raise
+        if self.auto["state"] == "running":
+            self._report("done", "Autopilot finished.")
 
     def validate_drive(self, payload, *, timed=False):
         try:
@@ -513,6 +586,8 @@ class BenchControl:
         async def telemetry():
             while True:
                 if self.bridge.connected and self.operation is None and not self.stop_pending:
+                    if getattr(self.bridge, "led_dirty", False):
+                        await self.bridge.set_led()     # keep the shield LEDs lit after STOPs
                     await self.bridge.refresh_distance()
                     self.publish()
                 await asyncio.sleep(.5)

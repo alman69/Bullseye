@@ -3,9 +3,13 @@
 Mission Control now defaults to a small, explicit color palette (`classifier.mode: "palette"`).
 It detects **red, green, blue, yellow, brown cardboard walls, and black home-base candidates**
 in the same frame. White floor is a background class, used by the existing free-space check.
-The selected mission color remains the approach target; other colored objects remain obstacles
-in the floor check. Wall/home detection is visual information, not a new autonomous return-home behavior.
-The planner remains a dry run and never drives the rover.
+Red and green are selectable ore targets. Blue is an obstacle, not an ore target; yellow remains
+available as a calibrated material. The selected ore is the approach target. The vision planner
+preview is diagnostic and does not drive by itself.
+Explicit **Autopilot** buttons on `/bench` can drive the connected, enabled rover: approach red or
+green ore, stop and signal the sample with green rover LEDs and a happy response on the connected BLE display, then automatically
+search for the black home flag and return. There is no manual pickup step in this demo.
+See the [autonomy plan](AUTONOMY_PLAN.md) for current limits and the exploration roadmap.
 
 ## Quick setup
 
@@ -26,8 +30,9 @@ The planner remains a dry run and never drives the rover.
 Each later patch adds a separate accepted variation: silver and white can both be floor,
 and teal, green and dark green can all be labeled green. The first patch replaces that class’s
 built-in profile. Classes still compete; overlapping examples may produce unknown pixels.
-Home base has an additional fixed near-black ceiling (HSV brightness ≤40/255, saturation ≤80/255),
-including for old saved profiles. New home patches have a narrow brightness tolerance of 8–14 levels.
+Home base has an additional fixed near-black gate: HSV brightness ≤40/255 and a difference
+of at most 12/255 between the brightest and darkest RGB channels, including for old saved profiles.
+HSV saturation is unreliable near black and is ignored for home. New home patches have a narrow brightness tolerance of 8–14 levels.
 Gray-shadow samples are rejected as home. Shadows as black as the actual base remain indistinguishable
 by color alone. Colored samples require brightness ≥20/255 and saturation ≥35/255.
 
@@ -81,13 +86,31 @@ and brightness use four-level bins (at most two levels of quantization error). T
 cost independent of the number of calibration patches. There is no online white-balance feedback or separate learned Gaussian model in palette mode.
 No probability/confidence claim is attached to a threshold match.
 
-Calibration is saved atomically in `software/vision/config.json` under `palette.profiles` and
-`rover_mask.polygons`. Existing camera presets, rectangular masks, navigation settings, and the
-legacy `color_model.json`/sample archive are preserved. Legacy HSV/classifier implementations remain
+## Saved calibration and restarts
+
+Calibration is saved immediately and atomically in `software/vision/config.json` under
+`palette.profiles` and `rover_mask.polygons`. Existing camera presets, rectangular masks, navigation
+settings, and the legacy `color_model.json`/sample archive are preserved. Legacy HSV/classifier implementations remain
 available for offline comparison; the dashboard's primary workflow uses the palette. Standalone
 replay supports `main.py --detector palette --source <image-or-video>` and uses the same saved profiles.
 The old OpenCV slider/sampling GUI is for legacy HSV/classifier modes; use Mission Control to
 calibrate the palette.
+
+- Accepted color examples accumulate and survive Ctrl-C, restarting Mission Control, and powering
+  the rover off. There is no separate Save or Fit step. Calibration undo history lasts only for the server session.
+- The saved file lives on the computer running Mission Control, not in the rover firmware.
+  `BULLSEYE_VISION_DIR` selects an alternate directory; keep that directory or copy its `config.json`
+  when moving to another computer or checkout. Back up this file before replacing a checkout.
+- The camera itself forgets its sensor settings on power loss. Mission Control reapplies the saved
+  camera preset when the real stream starts or resumes after a gap. Check the camera status; a
+  failed preset application can change the apparent colors even though the examples are saved.
+- Saving uses a file lock and revision check. A stale server cannot overwrite a newer calibration.
+  If another writer changed the file, the command reports a conflict; reload/retry with the saved
+  state. Run one controller at a time.
+- A software or rover restart alone does not require recalibration. Changed lighting, camera
+  settings, or camera position can require additional examples or a revised rover mask.
+
+## Frozen images
 
 Frozen images are lossless PNGs of the exact server pixels. Sampling refers to a bounded snapshot
 ID, not whatever live frame arrives later. Up to eight snapshots are retained across browser clients;
@@ -98,8 +121,8 @@ Stopping calibration or losing pilot controls returns the browser to live video.
 
 Automated coverage includes circular red hue, all six materials under brightness variation,
 background rejection, ambiguous colors, mixed/gray samples, recovering a muted color by calibration,
-polygon masks with an unmasked claw gap, snapshot identity/expiry, save/reload/undo, pointer cancellation,
-letterboxing, and browser freeze/resume behavior. These synthetic checks are regression tests,
+polygon masks with an unmasked claw gap, snapshot identity/expiry, save/reload/undo, concurrent-writer
+rejection, restart preservation, pointer cancellation, letterboxing, and browser freeze/resume behavior. These synthetic checks are regression tests,
 not measurements of real-world accuracy.
 
 Physical acceptance still needs the actual camera and objects:
@@ -107,7 +130,7 @@ Physical acceptance still needs the actual camera and objects:
 - Empty arena: no red/green/blue/yellow detections; walls identified; examine black shadow candidates.
 - All objects together: correct labels nearby and far away, with no cross-color detections.
 - Real black base: visible while nearby dark shadows are checked explicitly.
-- Claws: neither blue tape nor black rover parts detected, including while the gripper is operated.
+- Claws: neither blue tape nor black rover parts detected in the normal driving configuration.
 - Calibration: one click improves the intended material; restart retains it; undo/reset behaves as expected.
 - Performance: verify displayed FPS and processing time on the laptop with the real stream.
 

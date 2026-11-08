@@ -298,3 +298,37 @@ def test_help_does_not_import_bleak_or_touch_hardware():
 def test_invalid_options_fail_before_any_transport(args):
     with pytest.raises(SystemExit) as error: display.arguments(args)
     assert error.value.code == 2
+
+
+def test_arrival_expression_and_legacy_packet_compatibility():
+    normal = display.from_state(state(), 10).packet(1, 10)
+    assert "expression" not in normal and len(normal) == 7
+    data = state(bench={"distance_status": "live", "distance_age_ms": 180,
+                        "auto": {"state": "sample_reached", "expression": "happy"}})
+    observation = display.from_state(data, 10)
+    happy = observation.packet(2, 10.5)
+    assert happy["expression"] == "happy"
+    assert json.loads(display.encode_packet(happy))["expression"] == "happy"
+    assert len(display.encode_packet(happy)) <= 256
+    assert "expression" not in observation.packet(3, 13)  # stale producer cannot latch celebration
+    assert "expression" not in display.from_state({**data, "rover": "disconnected"}, 10).packet(4, 10)
+    data["bench"]["auto"]["expression"] = "auto"
+    assert "expression" not in display.from_state(data, 10).packet(5, 10)
+
+
+@pytest.mark.parametrize("expression", ["grumpy", None, True, [], 1])
+def test_invalid_expression_is_rejected(expression):
+    with pytest.raises(display.ProtocolError):
+        display.encode_packet({**packet(), "expression": expression})
+    with pytest.raises(display.ProtocolError):
+        display.from_state(state(bench={"distance_status": "live", "distance_age_ms": 0,
+                                       "auto": {"expression": expression}}), 10)
+
+
+def test_happy_is_independent_of_distance_sample_validity():
+    for status in ("invalid", "unavailable", "stale"):
+        data = state(distance_cm=None, bench={"distance_status": status, "distance_age_ms": None,
+                                              "auto": {"expression": "happy"}})
+        outgoing = display.from_state(data, 10).packet(1, 10)
+        assert outgoing["expression"] == "happy" and outgoing["distance_cm"] is None
+        display.encode_packet(outgoing)

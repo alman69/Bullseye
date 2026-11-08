@@ -230,6 +230,35 @@ void navigation() {
   gesture(GestureKind::Tap, 120, 250, 200); assert(model.face.mood(200) == Mood::Happy);
   model.page = kDistancePage; gesture(GestureKind::Tap, 408, 250, 300); assert(model.face.automatic());
 }
+void arrivalExpression() {
+  const std::string happy = replaced(good, "\"v\":1", "\"expression\":\"happy\",\"v\":1");
+  Sample sample;
+  assert(decodeSample(frameOf(happy), sample) && sample.expression == Expression::Happy);
+  assert(decodeSample(frameOf(good), sample) && sample.expression == Expression::Auto);
+  assert(decodeSample(frameOf(replaced(happy, "\"happy\"", "\"auto\"")), sample));
+  for (const auto& value : {"null", "true", "1", "[]", "\"grumpy\""})
+    assert(!decodeSample(frameOf(replaced(happy, "\"happy\"", value)), sample));
+  assert(!decodeSample(frameOf(replaced(happy, "\"v\":1", "\"expression\":\"auto\",\"v\":1")), sample));
+  Model model; model.page = kDistancePage; model.link(true, 7, 100);
+  Frame frame = frameOf(happy); assert(decodeSample(frame, sample));
+  assert(model.apply(sample, frame, 200) == Ack::Applied);
+  assert(model.happyActive(200) && model.displayPage(200) == kFacePage);
+  assert(model.displayFace(200).mood(200) == Mood::Happy && model.face.automatic());
+  Canvas canvas; Renderer renderer; renderer.render(canvas, model, "GT911", 200);
+  assert(canvas.texts.empty()); assertFace(canvas, model.displayFace(200), 200);
+  renderer.render(canvas, model, "GT911", 700); assertFace(canvas, model.displayFace(700), 700);
+  sample.seq++; model.apply(sample, frame, 1000);
+  assert(model.displayFace(1000).elapsed(1000) == 800);  // repeated packets do not restart animation
+  handleGesture(model, {onebox::GestureKind::Left, 200, 100}, 1100);
+  assert(model.page == kDistancePage);
+  assert(model.happyActive(3999) && !model.happyActive(4000));
+  assert(model.displayPage(4000) == kDistancePage && model.displayFace(4000).automatic());
+  sample.seq++; sample.expression = Expression::Auto; model.apply(sample, frame, 1200);
+  assert(!model.happyActive(1200));
+  renderer.render(canvas, model, "GT911", 1200); assert(!canvas.texts.empty());
+  sample.seq++; sample.expression = Expression::Happy; model.apply(sample, frame, 1300);
+  assert(model.happyActive(1300)); model.link(false, 8, 1400); assert(!model.happyActive(1400));
+}
 struct Bus {
   bool gt = true;
   bool read(uint8_t address, uint16_t reg, uint8_t, uint8_t* out, size_t count) {
@@ -257,6 +286,6 @@ void touching() {
   assert(gestures.update({onebox::TouchState::Released, 0, 0, 1}, 350).kind == onebox::GestureKind::Left);
 }
 int main() {
-  framing(); schemas(); states(); rendering(); faces(); navigation(); touching();
+  framing(); schemas(); states(); rendering(); faces(); navigation(); touching(); arrivalExpression();
   std::cout << "Native display checks passed: framing, schemas, ACK, freshness, reconnect, rendering, pixel animations, three-page touch navigation.\n";
 }

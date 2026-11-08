@@ -28,6 +28,7 @@ class FaceController {
     return automatic_ ? age % 4000 : age;
   }
   bool automatic() const { return automatic_; }
+  void select(Mood mood, uint32_t now) { selected_ = mood; automatic_ = false; changedAt_ = now; }
   void next(uint32_t now) {
     selected_ = static_cast<Mood>((static_cast<uint8_t>(mood(now)) + 1) % 5);
     automatic_ = false; changedAt_ = now;

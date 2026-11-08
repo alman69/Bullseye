@@ -65,6 +65,7 @@ export type MissionState = {
     distance_status?: "live" | "invalid" | "stale" | "unavailable";
     distance_age_ms?: number | null;
     scooper?: ScooperState;
+    auto?: { state: "idle" | "running" | "arrived" | "sample_reached" | "home_arrived" | "done" | "failed" | "stopped"; message: string; expression?: "happy" | "auto" | null };
   };
   events: { id: string; at: string; message: string; level: string }[];
   vision?: VisionSummary | null;

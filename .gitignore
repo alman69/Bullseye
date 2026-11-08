@@ -26,3 +26,6 @@ node_modules/
 dist/
 .env
 *.tsbuildinfo
+
+# Advisory lock for persistent vision calibration writes.
+software/vision/.config.json.lock

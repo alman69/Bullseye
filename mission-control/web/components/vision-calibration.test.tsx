@@ -80,11 +80,15 @@ describe("VisionCalibration", () => {
     expect((screen.getByRole("button", { name: "Use built-in colors" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("explains legacy mode and exposes the six materials", () => {
+  it("explains legacy mode and keeps every material available for calibration", () => {
     render(<VisionCalibration vision={summary} ui={ui()} canAct act={vi.fn()} />);
     expect(screen.getByRole("alert").textContent).toMatch(/Legacy detection/);
     expect(screen.getByRole("button", { name: /Black home base/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Brown wall/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Red sample/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Green sample/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Blue obstacle/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Yellow material/ })).toBeTruthy();
   });
 
   it("starts with colors and traces rover outlines", () => {
@@ -106,8 +110,12 @@ describe("VisionPanel", () => {
     expect(screen.getByText("RED DETECTED")).toBeTruthy();
     expect(screen.getByText(/APPROACH → TURN LEFT 200 ms/)).toBeTruthy();
     expect(screen.getByText(/~42 cm/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "yellow" }));
-    expect(act).toHaveBeenCalledWith("vision_target", { color: "yellow" });
+    expect(screen.queryByRole("button", { name: "blue" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "yellow" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "green" }));
+    expect(act).toHaveBeenCalledWith("vision_target", { color: "green" });
+    fireEvent.click(screen.getByRole("button", { name: "home" }));
+    expect(act).toHaveBeenCalledWith("vision_target", { color: "home" });
   });
 
   it("explains when vision is off or unavailable", () => {

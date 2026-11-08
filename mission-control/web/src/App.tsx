@@ -69,7 +69,7 @@ const STAGE_INDEX: Record<Phase, number> = {
   completed: 5,
   stopped: -1,
 };
-const SAMPLE_COLORS: SampleColor[] = ["red", "green", "blue", "yellow"];
+const SAMPLE_COLORS: SampleColor[] = ["red", "green"];
 
 function MissionClock({ state }: { state: MissionState | null }) {
   const [now, setNow] = useState(Date.now());
@@ -235,7 +235,7 @@ function SampleReview({
             <p>
               {phase === "completed"
                 ? "Home arrival was confirmed by the pilot. Ready for another discovery."
-                : `The ${state?.target} indicator command was acknowledged. Your sample is ready for the journey home.`}
+                : "The green indicator command was acknowledged. Your sample is ready for the journey home."}
             </p>
           </div>
           <div
@@ -418,8 +418,9 @@ export default function App() {
                   </p>
                   <h3>02 / Choose your sample</h3>
                   <p>
-                    Select red, green, or blue, then launch. The simulator
-                    searches, approaches, and stops for review.
+                    Select a red or green sample, then launch. Blue marks
+                    obstacles, brown marks cardboard walls, and black marks
+                    home. The simulator searches, approaches, and stops for review.
                   </p>
                   <h3>03 / Make the call</h3>
                   <p>

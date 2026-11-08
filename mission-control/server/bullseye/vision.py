@@ -84,6 +84,7 @@ class VisionService:
         self.confusion: dict | None = None
         self.ground_captures: list = []         # [{"distance_cm", "bottom_y", "width"}]
         self.fov_captures: dict = {}            # {"center": error, "side": error}
+        self.last_seen = None
         self._times: deque = deque(maxlen=30)
         self._last_frame_at = 0.0
         self._camera_busy = False
@@ -141,9 +142,10 @@ class VisionService:
         self.subscribers.discard(queue)
 
     def set_target(self, color: str) -> None:
-        if color != self.target:
-            self.target = color
-            with self.lock:
+        color = "home" if color == "black" else color
+        with self.lock:
+            if color != self.target:
+                self.target = color
                 if self.available:
                     self.nav.reset()
 
@@ -186,6 +188,8 @@ class VisionService:
             frame = SimpleNamespace(image=image, received_at=time.monotonic())
             action = self.nav.update(frame, det, self.detector, prepared=prepared)
             self._image, self._prepared, self._det = image, prepared, det
+            if det.detected:
+                self.last_seen = {"seq": seq, "t": frame.received_at, "target": self.target, "err": float(det.horizontal_error)}
             self._processed_at = time.monotonic()
             result = self._result(image, det, action, seq)
             now = time.monotonic()
@@ -394,7 +398,15 @@ class VisionService:
 
     def _locked(self, handler, payload):
         with self.lock:
-            handler(payload)
+            try:
+                handler(payload)
+            except self.v.config.ConfigConflictError as error:
+                self._load()
+                self.palette_undo.clear()
+                self._snapshots.clear()
+                self._prepared = self.detector.prepare(self._image) if self._image is not None else None
+                self.message = "Reloaded calibration changed by another server or checkout. Nothing was overwritten. Retry your change on a new frozen image."
+                raise CommandError(self.message) from error
 
     def _need_frame(self):
         if self._image is None:
@@ -402,8 +414,9 @@ class VisionService:
 
     def _cmd_target(self, p):
         color = p.get("color")
-        if color not in ("red", "green", "blue", "yellow"):
-            raise CommandError("Choose red, green, blue or yellow.")
+        color = "home" if color == "black" else color
+        if color not in ("red", "green", "home"):
+            raise CommandError("Choose a red or green sample, or home. Blue is an obstacle.")
         self.target = color
         self.nav.reset()
 

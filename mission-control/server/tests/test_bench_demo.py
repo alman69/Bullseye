@@ -48,6 +48,8 @@ class StreamWriter:
             self.reader.feed(b"{old_99}")
             self.reader.feed(("{" + command["H"] + "_").encode())
             self.reader.feed((str(self.distance) + "}").encode())
+        elif command["N"] == 8:
+            self.reader.feed(("{" + command["H"] + "_ok}").encode())
         elif command["N"] == 22 and self.fence_reply:
             self.reader.feed(("{" + command["H"] + "_" + self.fence_value + "}").encode())
         elif command["N"] == 2:
@@ -67,6 +69,15 @@ class StreamWriter:
     @property
     def commands(self):
         return [json.loads(frame) for frame in self.sent if frame != b"{Heartbeat}"]
+
+
+def assert_stopped_after_motion(commands):
+    """After the last N2 the very next command is STOP; LED (N8) commands only ever follow a STOP."""
+    numbers = [command["N"] for command in commands]
+    last_move = max(i for i, n in enumerate(numbers) if n == 2)
+    assert numbers[last_move + 1] == 100
+    assert all(n in (100, 8) for n in numbers[last_move + 1:])
+    assert all(numbers[i - 1] in (100, 8) for i, n in enumerate(numbers) if n == 8)
 
 
 @pytest_asyncio.fixture
@@ -96,8 +107,9 @@ async def test_bridge_one_finite_pulse_with_correlated_completion_then_stop(tcp)
     bridge, _, writer, _ = tcp
     await bridge.pulse("forward", 40, 1000)
     commands = writer.commands
-    assert [command["N"] for command in commands] == [100, 21, 100, 2, 100]
-    assert commands[-2]["D1"] == 3 and commands[-2]["D2"] == 40 and commands[-2]["T"] == 1000
+    assert [command["N"] for command in commands] == [100, 21, 100, 8, 2, 100, 8]   # LEDs re-set after each STOP
+    assert (commands[3]["D2"], commands[3]["D3"], commands[3]["D4"]) == (255, 0, 0)  # red by default
+    assert commands[-3]["D1"] == 3 and commands[-3]["D2"] == 40 and commands[-3]["T"] == 1000
     assert bridge.last_stop_acknowledged is True
     assert bridge.heartbeats == 1
 
@@ -108,7 +120,7 @@ async def test_bridge_missing_or_old_completion_reply_still_sends_stop(tcp):
     async with asyncio.timeout(.5):
         await bridge.pulse("left", 40, 50)
     assert [command["N"] for command in writer.commands].count(2) == 1
-    assert writer.commands[-1]["N"] == 100
+    assert_stopped_after_motion(writer.commands)
 
 
 async def test_bridge_cancel_during_motion_stops_and_never_replays(tcp):
@@ -119,7 +131,7 @@ async def test_bridge_cancel_during_motion_stops_and_never_replays(tcp):
     job.cancel()
     with pytest.raises(asyncio.CancelledError):
         await job
-    assert writer.commands[-1]["N"] == 100
+    assert_stopped_after_motion(writer.commands)
     assert sum(command["N"] == 2 for command in writer.commands) == 1
     opened.assert_awaited_once()
 
@@ -474,3 +486,10 @@ def test_bench_api_opt_in_shared_pilot_and_duplicate_ids():
             assert client.post("/api/bench/stop").json()["phase"] == "stopped"
             client.post("/api/stop")
             assert client.get("/api/bench/state").json()["bench"]["armed"] is False
+
+
+async def test_set_led_stops_first_then_sets_the_color(tcp):
+    bridge, _, writer, _ = tcp
+    assert await bridge.set_led((0, 255, 0))
+    assert [command["N"] for command in writer.commands][-2:] == [100, 8]
+    assert (writer.commands[-1]["D2"], writer.commands[-1]["D3"]) == (0, 255) and not bridge.led_dirty

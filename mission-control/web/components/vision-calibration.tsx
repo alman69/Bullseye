@@ -146,7 +146,7 @@ function ColorsTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: Vis
       <Button size="sm" variant="outline" disabled={!canAct || !selected} onClick={() => void act("vision_palette_reset", { cls: selected?.id })}>Reset {selected?.label ?? "selected color"}</Button>
       <Button size="sm" variant="outline" disabled={!canAct} onClick={() => void act("vision_palette_reset", {})}>Use built-in colors</Button>
     </div>
-    <p className="vision-note">Red, green, blue and yellow mark objects. Brown marks cardboard walls. Black marks home-base candidates; deep shadows can look black too. Floor samples help reject tinted floor. Check an empty arena and then all objects before relying on the result.</p>
+    <p className="vision-note">Red and green mark samples. Blue marks obstacles; yellow is another material you can calibrate. Brown marks cardboard walls. Black marks the home flag and stays restricted to near-black pixels. Floor samples help reject tinted floor. Check an empty arena and then all objects before relying on the result.</p>
   </div>;
 }
 

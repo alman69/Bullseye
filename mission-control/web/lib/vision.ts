@@ -92,7 +92,7 @@ export type VisionOverlayOptions = {
   onSampleBox?: (box: [number, number, number, number]) => void;
 };
 
-export const VISION_TARGETS = ["red", "green", "blue", "yellow"] as const;
+export const VISION_TARGETS = ["red", "green", "home"] as const;
 
 /** Special "sampling class": dragging adds a rover-mask box instead of color samples. */
 export const MASK_TOOL = "__rover_mask__";
@@ -105,10 +105,10 @@ export const CAMERA_TUNING: { key: string; label: string; hint: string }[] = [
 ];
 
 export const SAMPLE_CLASSES: { id: string; label: string; hex: string; key: string }[] = [
-  { id: "red", label: "Red", hex: "#f06b7c", key: "1" },
-  { id: "green", label: "Green", hex: "#65c79b", key: "2" },
-  { id: "blue", label: "Blue", hex: "#79aaf4", key: "3" },
-  { id: "yellow", label: "Yellow", hex: "#f2d15c", key: "4" },
+  { id: "red", label: "Red sample", hex: "#f06b7c", key: "1" },
+  { id: "green", label: "Green sample", hex: "#65c79b", key: "2" },
+  { id: "blue", label: "Blue obstacle", hex: "#79aaf4", key: "3" },
+  { id: "yellow", label: "Yellow material", hex: "#f2d15c", key: "4" },
   { id: "floor", label: "Floor", hex: "#e9e6de", key: "5" },
   { id: "cardboard", label: "Brown wall", hex: "#c0925e", key: "6" },
   { id: "home", label: "Black home base", hex: "#88909d", key: "7" },

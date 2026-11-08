@@ -41,7 +41,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-COLORS = ("red", "yellow", "green", "blue")
+COLORS = ("red", "yellow", "green", "blue", "black")
 Prepared = namedtuple("Prepared", "corrected labels")   # white-balanced frame + class-index image
 LEFT, CENTER, RIGHT, NONE = "LEFT", "CENTER", "RIGHT", "NONE"
 
@@ -336,6 +336,8 @@ class ColorDetector:
         return det
 
     def _range(self, color: str) -> HsvRange:
+        if color == "home" and color not in self.ranges:
+            color = "black"  # legacy HSV compatibility; palette uses the canonical home class
         if color not in self.ranges and self.model is not None:
             raise ValueError(f"unknown color {color!r}; model classes: {', '.join(self.model.classes)}")
         try:

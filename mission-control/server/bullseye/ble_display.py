@@ -19,6 +19,7 @@ RX_UUID = "3f7c1001-6f54-4a9c-8b2d-56e39a18c201"
 ACK_UUID = "3f7c1002-6f54-4a9c-8b2d-56e39a18c201"
 DEFAULT_STATE_URL = "http://127.0.0.1:8001/api/bench/state"
 STATUSES = {"live", "stale", "invalid", "unavailable"}
+EXPRESSIONS = {"auto", "happy"}
 UINT32_MAX = 0xFFFFFFFF
 ACK_TIMEOUT_SECONDS = 3.0
 WRITE_TIMEOUT_SECONDS = 2.0
@@ -46,14 +47,19 @@ class Observation:
     rover_connected: bool
     source: str
     observed_at: float
+    expression: str = "auto"
 
     def packet(self, seq: int, now: float) -> dict:
         age = None if self.sample_age_ms is None else min(
             UINT32_MAX, self.sample_age_ms + max(0, int((now - self.observed_at) * 1000))
         )
         status = "stale" if self.status == "live" and age is not None and age >= 1500 else self.status
-        return {"v": 1, "seq": seq, "distance_cm": self.distance_cm, "status": status,
-                "sample_age_ms": age, "rover_connected": self.rover_connected, "source": self.source}
+        packet = {"v": 1, "seq": seq, "distance_cm": self.distance_cm, "status": status,
+                  "sample_age_ms": age, "rover_connected": self.rover_connected, "source": self.source}
+        # Omit auto for compatibility with the original seven-field display protocol.
+        if self.expression == "happy" and now - self.observed_at < 3:
+            packet["expression"] = "happy"
+        return packet
 
 
 def unavailable(now: float) -> Observation:
@@ -67,25 +73,34 @@ def from_state(state: dict, now: float) -> Observation:
     status = state["bench"].get("distance_status")
     if not isinstance(status, str) or status not in STATUSES:
         raise ProtocolError("Unsupported distance state; update the rover controller")
+    auto = state["bench"].get("auto") or {}
+    expression = auto.get("expression", "auto") if isinstance(auto, dict) else "auto"
+    if not isinstance(expression, str) or expression not in EXPRESSIONS:
+        raise ProtocolError("Unsupported display expression")
     connected = state.get("rover") == "connected"
     cm, age = state.get("distance_cm"), state["bench"].get("distance_age_ms")
     if age is not None:
         uint(age)
-    if not connected or status == "unavailable":
+    if not connected:
         return unavailable(now)
+    if status == "unavailable":
+        return Observation(None, status, age, connected, "rover", now, expression)
     if status == "invalid":
         cm = None
     if cm is not None and not 1 <= uint(cm) <= 150:
         raise ProtocolError("Distance outside the factory driver's range")
     if status == "live" and (cm is None or age is None):
         raise ProtocolError("Live distance requires a value and sample age")
-    return Observation(cm, status, age, connected, "rover", now)
+    return Observation(cm, status, age, connected, "rover", now, expression)
 
 
 def encode_packet(packet: dict) -> bytes:
     required = {"v", "seq", "distance_cm", "status", "sample_age_ms", "rover_connected", "source"}
-    if not isinstance(packet, dict) or set(packet) != required or uint(packet["v"]) != 1:
+    if not isinstance(packet, dict) or set(packet) not in (required, required | {"expression"}) or uint(packet["v"]) != 1:
         raise ProtocolError("Unsupported packet schema")
+    expression = packet.get("expression", "auto")
+    if not isinstance(expression, str) or expression not in EXPRESSIONS:
+        raise ProtocolError("Invalid display expression")
     uint(packet["seq"], minimum=1)
     cm, age, status = packet["distance_cm"], packet["sample_age_ms"], packet["status"]
     if not isinstance(status, str) or status not in STATUSES or not isinstance(packet["source"], str) or packet["source"] not in {"rover", "demo"} or type(packet["rover_connected"]) is not bool:

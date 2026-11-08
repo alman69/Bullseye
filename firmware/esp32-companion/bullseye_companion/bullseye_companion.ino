@@ -36,6 +36,7 @@ class FaceController {
     return automatic_ ? age % 4000 : age;
   }
   bool automatic() const { return automatic_; }
+  void select(Mood mood, uint32_t now) { selected_ = mood; automatic_ = false; changedAt_ = now; }
   void next(uint32_t now) {
     selected_ = static_cast<Mood>((static_cast<uint8_t>(mood(now)) + 1) % 5);
     automatic_ = false; changedAt_ = now;
@@ -184,6 +185,7 @@ constexpr size_t kMaxFrame = 256;  // Includes newline; storage ends with NUL in
 constexpr uint32_t kPartialTimeoutMs = 2000, kSampleStaleMs = 1500, kDataTimeoutMs = 3000;
 enum class Ack : uint8_t { Applied = 0, Invalid = 1, Overflow = 2, Old = 3 };
 enum class Status : uint8_t { Live, Stale, Invalid, Unavailable };
+enum class Expression : uint8_t { Auto, Happy };
 enum class Source : uint8_t { Rover, Demo };
 
 inline void encodeAck(uint8_t out[8], Ack status, uint32_t seq) {
@@ -252,6 +254,7 @@ struct Sample {
   bool hasDistance = false, hasAge = false, roverConnected = false;
   Status status = Status::Unavailable;
   Source source = Source::Rover;
+  Expression expression = Expression::Auto;
 };
 
 enum class ViewState : uint8_t { Disconnected, Waiting, Timeout, Unavailable, Invalid, Stale, Live };
@@ -267,6 +270,7 @@ class Model {
     if (!sample.seq) return Ack::Invalid;
     if (!connected_ || frame.epoch != epoch_) return Ack::Old;
     if (hasSample_ && sample.seq <= sample_.seq) return Ack::Old;
+    if (sample.expression == Expression::Happy && !happyActive(now)) happyAt_ = now;
     sample_ = sample; hasSample_ = true; started_ = frame.startedMs; applied_ = now;
     return Ack::Applied;
   }
@@ -283,6 +287,16 @@ class Model {
     if (sample_.status == Status::Stale || !sample_.hasAge || age(now) >= kSampleStaleMs) return ViewState::Stale;
     return sample_.hasDistance ? ViewState::Live : ViewState::Unavailable;
   }
+  bool happyActive(uint32_t now) const {
+    return connected_ && hasSample_ && sample_.roverConnected && sample_.source == Source::Rover &&
+           sample_.expression == Expression::Happy && static_cast<uint32_t>(now - applied_) < kDataTimeoutMs;
+  }
+  uint8_t displayPage(uint32_t now) const { return happyActive(now) ? kFacePage : page; }
+  FaceController displayFace(uint32_t now) const {
+    FaceController result = face;
+    if (happyActive(now)) result.select(Mood::Happy, happyAt_);
+    return result;
+  }
   const Sample& sample() const { return sample_; }
   bool connected() const { return connected_; }
   bool hasSample() const { return hasSample_; }
@@ -291,7 +305,7 @@ class Model {
   FaceController face;
  private:
   Sample sample_;
-  uint32_t epoch_ = 0, started_ = 0, applied_ = 0, linked_ = 0;
+  uint32_t epoch_ = 0, started_ = 0, applied_ = 0, linked_ = 0, happyAt_ = 0;
   bool connected_ = false, hasSample_ = false;
 };
 
@@ -349,15 +363,15 @@ inline bool decodeSample(const Frame& frame, Sample& sample) {
   cJSON* root = cJSON_ParseWithLengthOpts(frame.text, frame.length + 1, &end, true);
   if (!root) return false;
   bool valid = cJSON_IsObject(root) && end == frame.text + frame.length;
-  constexpr const char* names[] = {"v", "seq", "distance_cm", "status", "sample_age_ms", "rover_connected", "source"};
+  constexpr const char* names[] = {"v", "seq", "distance_cm", "status", "sample_age_ms", "rover_connected", "source", "expression"};
   unsigned fields = 0;
   for (const cJSON* child = root->child; child && valid; child = child->next) {
     unsigned index = 0;
-    for (; index < 7 && strcmp(child->string ? child->string : "", names[index]); ++index) {}
-    if (index == 7 || fields & (1u << index)) valid = false;
+    for (; index < 8 && strcmp(child->string ? child->string : "", names[index]); ++index) {}
+    if (index == 8 || fields & (1u << index)) valid = false;
     else fields |= 1u << index;
   }
-  valid = valid && fields == 127;
+  valid = valid && (fields == 127 || fields == 255);
   if (valid) {
     const auto field = [root](const char* name) { return cJSON_GetObjectItemCaseSensitive(root, name); };
     uint32_t version = 0, distance = 0;
@@ -365,6 +379,8 @@ inline bool decodeSample(const Frame& frame, Sample& sample) {
     const cJSON* age = field("sample_age_ms");
     const cJSON* status = field("status");
     const cJSON* source = field("source");
+    const cJSON* expression = field("expression");
+    sample.expression = Expression::Auto;
     valid = jsonUint(field("v"), version) && version == 1 && jsonUint(field("seq"), sample.seq, 1) &&
             cJSON_IsBool(field("rover_connected")) && cJSON_IsString(status) && cJSON_IsString(source);
     sample.roverConnected = cJSON_IsTrue(field("rover_connected"));
@@ -374,6 +390,11 @@ inline bool decodeSample(const Frame& frame, Sample& sample) {
             (!sample.hasAge || jsonUint(age, sample.ageMs));
     sample.cm = static_cast<uint16_t>(distance);
     if (valid) {
+      if (expression) {
+        if (!cJSON_IsString(expression)) valid = false;
+        else if (!strcmp(expression->valuestring, "happy")) sample.expression = Expression::Happy;
+        else if (strcmp(expression->valuestring, "auto")) valid = false;
+      }
       if (!strcmp(status->valuestring, "live")) sample.status = Status::Live;
       else if (!strcmp(status->valuestring, "stale")) sample.status = Status::Stale;
       else if (!strcmp(status->valuestring, "invalid")) sample.status = Status::Invalid;
@@ -399,28 +420,29 @@ namespace bullseye {
 class Renderer {
  public:
   template <class Screen> void render(Screen& screen, const Model& model, const char* touch, uint32_t now) {
-    const bool layout = !painted_ || page_ != model.page;
+    const uint8_t page = model.displayPage(now);
+    const bool layout = !painted_ || page_ != page;
     if (layout) {
       screen.fillScreen(kNavy); screen.setTextWrap(false);
       faceRenderer_.invalidate();
     }
-    if (model.page == kFacePage) {
-      faceRenderer_.render(screen, model.face, now);
-      page_ = model.page; painted_ = true;
+    if (page == kFacePage) {
+      faceRenderer_.render(screen, model.displayFace(now), now);
+      page_ = page; painted_ = true;
       return;  // Full-screen face: no title, labels, status, buttons or tabs.
     }
     const DisplayText text = present(model, touch, now);
     if (layout) {
       print(screen, 12, 12, 2, "BULLSEYE", kCream);
       screen.fillRect(12, 43, 456, 2, kRed);
-      if (model.page == kDistancePage) print(screen, 16, 65, 1, "ULTRASONIC DISTANCE", kCream);
-      else if (model.page == kLinkPage) {
+      if (page == kDistancePage) print(screen, 16, 65, 1, "ULTRASONIC DISTANCE", kCream);
+      else if (page == kLinkPage) {
         const char* labels[] = {"Bluetooth", "Rover", "Source", "Freshness", "Last sequence", "Touch controller", "Protocol errors"};
         for (uint8_t i = 0; i < 7; ++i) print(screen, 16, 63 + i * 29, 1, labels[i], kCream);
       }
     }
     if (layout || strcmp(previous_.lines[0], text.lines[0])) field(screen, 275, 17, 194, 15, 1, text.lines[0], kCream);
-    if (model.page == kDistancePage) {
+    if (page == kDistancePage) {
       if (layout || strcmp(previous_.lines[1], text.lines[1])) field(screen, 16, 103, 450, 65, 6, text.lines[1], kCream);
       if (layout || strcmp(previous_.lines[2], text.lines[2])) field(screen, 16, 192, 450, 24, 2, text.lines[2], model.state(now) == ViewState::Live ? kCream : kRed);
       if (layout || strcmp(previous_.lines[3], text.lines[3])) field(screen, 16, 229, 450, 14, 1, text.lines[3], kCream);
@@ -435,7 +457,7 @@ class Renderer {
         if (layout || strcmp(previous_.lines[index], text.lines[index])) field(screen, 205, 63 + row * 29, 264, 15, 1, text.lines[index], kCream);
       }
     }
-    previous_ = text; page_ = model.page; painted_ = true;
+    previous_ = text; page_ = page; painted_ = true;
   }
  private:
   template <class Screen> static void print(Screen& screen, int x, int y, int size, const char* text, uint16_t color) {
@@ -610,7 +632,8 @@ class TouchGestures {
 
 
 namespace bullseye {
-inline void handleGesture(Model& model, const onebox::Gesture& gesture, uint32_t) {
+inline void handleGesture(Model& model, const onebox::Gesture& gesture, uint32_t now) {
+  if (model.happyActive(now)) return;  // Preserve the local page during the arrival celebration.
   if (gesture.kind == onebox::GestureKind::Left) model.page = (model.page + 1) % kPageCount;
   else if (gesture.kind == onebox::GestureKind::Right) model.page = (model.page + kPageCount - 1) % kPageCount;
   // Navigation is swipe-only. Former tab/button hit regions have no effect.

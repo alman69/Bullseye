@@ -210,7 +210,7 @@ class ConfigTests(unittest.TestCase):
             cfg["detector"]["min_area_px"] = 999
             save_config(cfg, path)
             self.assertEqual(load_config(path), cfg)
-            self.assertEqual([p.name for p in Path(tmp).iterdir()], ["config.json"])  # no temp files left
+            self.assertEqual([p.name for p in Path(tmp).iterdir()], [".config.json.lock", "config.json"])  # no temp files left
 
     def test_repo_config_matches_defaults_keys(self):
         cfg = clean_config()

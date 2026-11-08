@@ -96,6 +96,20 @@ class PaletteTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             fit_patch(np.full((100, 3), 65, np.uint8), "home")
 
+    def test_near_black_camera_noise_uses_absolute_chroma(self):
+        # Actual saved home samples are S=255 at V=5 and 10. Ratio saturation
+        # should not reject a five-level channel difference in a nearly black pixel.
+        saved = [{"center": [0, 255, v], "scale": [90, 35, 45]} for v in (5, 10)]
+        pixels = np.uint8([[[5, 0, 0], [0, 10, 0], [8, 8, 8], [20, 0, 0], [50, 50, 50]]])
+        for palette in (ArenaPalette(), ArenaPalette({"home": saved})):
+            labels = palette.labels(pixels)[0]
+            self.assertTrue(np.all(labels[:3] == palette.index("home")))
+            self.assertTrue(np.all(labels[3:] != palette.index("home")))
+        fitted = fit_patch(np.tile([0, 0, 10], (100, 1)).astype(np.uint8), "home")
+        self.assertEqual(ArenaPalette({"home": [fitted]}).labels(pixels)[0, 1], 5)
+        with self.assertRaises(ValueError):
+            fit_patch(np.tile([0, 0, 30], (100, 1)).astype(np.uint8), "home")
+
     def test_tied_materials_are_unknown(self):
         profile = fit_patch(np.tile(bgr(20, 150, 180), (100, 1)), "yellow")
         palette = ArenaPalette({"yellow": [profile], "cardboard": [profile]})
