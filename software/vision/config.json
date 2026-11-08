@@ -8,7 +8,8 @@
     "rotate": 0,
     "controls": {
       "saturation": 2,
-      "ae_level": -2
+      "ae_level": -2,
+      "brightness": -2
     }
   },
   "detector": {
@@ -18,22 +19,6 @@
     "blur_kernel": 5,
     "morph_kernel": 5,
     "center_deadband": 0.12
-  },
-  "classifier": {
-    "mode": "auto",
-    "model_path": "color_model.json",
-    "samples_path": "captures/samples.npz",
-    "max_distance": 4.0,
-    "regularization": 4.0,
-    "white_balance": true,
-    "wb_alpha": 0.2,
-    "wb_min_floor": 0.02,
-    "wb_gain_min": 0.6,
-    "wb_gain_max": 1.6,
-    "floor_class": "floor"
-  },
-  "rover_mask": {
-    "boxes": []
   },
   "floor": {
     "roi_top": 0.5,
@@ -47,13 +32,6 @@
     "morph_kernel": 3,
     "target_dilate": 7,
     "min_floor_visible": 0.3
-  },
-  "ground": {
-    "points": [],
-    "width_k": null,
-    "horizon_y": null,
-    "stop_line_y": null,
-    "size_tolerance": 2.0
   },
   "navigation": {
     "turn_pwm": 60,
@@ -93,6 +71,84 @@
         "1000": 49.0
       }
     }
+  },
+  "ground": {
+    "points": [],
+    "width_k": null,
+    "horizon_y": null,
+    "stop_line_y": null,
+    "size_tolerance": 2.0
+  },
+  "rover_mask": {
+    "boxes": [
+      [
+        0.0121,
+        0.8308,
+        0.1384,
+        0.8776
+      ],
+      [
+        0.1301,
+        0.8079,
+        0.2771,
+        1.0
+      ],
+      [
+        0.2677,
+        0.7786,
+        0.3491,
+        0.9856
+      ],
+      [
+        0.2542,
+        0.7636,
+        0.3492,
+        0.7766
+      ],
+      [
+        0.1016,
+        0.8046,
+        0.2561,
+        0.8246
+      ],
+      [
+        0.6943,
+        0.7341,
+        0.786,
+        0.8987
+      ],
+      [
+        0.6269,
+        0.897,
+        0.7769,
+        1.0
+      ],
+      [
+        0.7873,
+        0.8516,
+        0.8655,
+        1.0
+      ],
+      [
+        0.3294,
+        0.8793,
+        0.3765,
+        0.9991
+      ]
+    ]
+  },
+  "classifier": {
+    "mode": "auto",
+    "model_path": "color_model.json",
+    "samples_path": "captures/samples.npz",
+    "max_distance": 4.0,
+    "regularization": 4.0,
+    "white_balance": true,
+    "wb_alpha": 0.2,
+    "wb_min_floor": 0.02,
+    "wb_gain_min": 0.6,
+    "wb_gain_max": 1.6,
+    "floor_class": "floor"
   },
   "colors": {
     "red": {
