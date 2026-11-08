@@ -16,6 +16,43 @@
     "morph_kernel": 5,
     "center_deadband": 0.12
   },
+  "floor": {
+    "roi_top": 0.5,
+    "strips": 5,
+    "s_max": 50,
+    "v_min": 90,
+    "blocked_height": 0.35,
+    "corridor_half_width": 0.45,
+    "column_percentile": 25,
+    "work_width": 160,
+    "morph_kernel": 3,
+    "target_dilate": 7,
+    "min_floor_visible": 0.3
+  },
+  "navigation": {
+    "turn_pwm": 60,
+    "drive_pwm": 60,
+    "aim_deadband": 0.12,
+    "turn_min_ms": 80,
+    "turn_max_ms": 250,
+    "forward_ms": 300,
+    "slow_forward_ms": 150,
+    "slow_area_ratio": 0.04,
+    "arrive_area_ratio": 0.08,
+    "arrive_distance_cm": 20,
+    "emergency_distance_cm": 10,
+    "distance_check_every": 3,
+    "lost_decisions": 3,
+    "search_turn_ms": 300,
+    "search_turns": 8,
+    "avoid_turn_ms": 300,
+    "avoid_forward_steps": 2,
+    "avoid_max_retries": 4,
+    "backoff_ms": 300,
+    "explore_steps": 3,
+    "explore_timeout_s": 120,
+    "decision_period_s": 0.5
+  },
   "colors": {
     "red": {
       "h": [

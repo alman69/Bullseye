@@ -7,6 +7,8 @@ Mission Control should use camera.CameraStream + detector.ColorDetector directly
 Keys (GUI):  r/y/g/b    select target color      c  toggle calibration window
              w          save HSV values to config s  save snapshot (raw, annotated, JSON)
              n          next image (offline folder) q / Esc  quit
+With --navigate (DRY RUN, never moves the rover):
+             f          toggle the floor-mask window  x  reset the planner
              left-click the video to read the HSV value under the cursor (p clears it)
 """
 from __future__ import annotations
@@ -25,9 +27,12 @@ import numpy as np
 from camera import CameraStream, FileSource, RateMeter
 from config import DEFAULT_CONFIG_PATH, load_config, save_config
 from detector import COLORS, ColorDetector, Detection, HsvRange
+from freespace import FloorSettings, analyze_floor
+from planner import BACKWARD, FORWARD, TURN_LEFT, TURN_RIGHT, NavSettings, Planner
 
 MAIN_WIN = "Bullseye Vision"
 CAL_WIN = "Calibration (mask)"
+FLOOR_WIN = "Floor mask (white = floor)"
 CAPTURE_DIR = Path(__file__).with_name("captures")
 BGR = {"red": (40, 40, 230), "yellow": (0, 220, 255), "green": (60, 200, 60), "blue": (230, 120, 40)}
 COLOR_KEYS = {ord("r"): "red", ord("y"): "yellow", ord("g"): "green", ord("b"): "blue"}
@@ -99,6 +104,89 @@ def waiting_image(text: str) -> np.ndarray:
     return img
 
 
+# ------------------------------------------------------------ navigation dry run
+class NavRunner:
+    """Dry run: floor check on every frame, one planner decision every
+    `decision_period_s` (roughly one move + settle in the real loop).
+    It only computes and displays actions; it never sends anything to the rover.
+    Vision only: the ultrasonic sensor is not read, so arrival is visual."""
+
+    def __init__(self, cfg: dict):
+        self.floor = FloorSettings.from_dict(cfg["floor"])
+        self.settings = NavSettings.from_dict(cfg["navigation"])
+        self.planner = Planner(self.settings, use_distance=False)
+        self.free = None
+        self.action = None
+        self.next_at = 0.0
+
+    def reset(self) -> None:
+        self.planner.reset()
+        self.action = None
+        self.next_at = 0.0
+
+    def update(self, frame, det: Detection, detector: ColorDetector, now: float | None = None):
+        now = time.monotonic() if now is None else now
+        exclude = detector.mask(frame.image, det.target_color) if det.detected else None
+        self.free = analyze_floor(frame.image, self.floor, exclude)
+        if now >= self.next_at:
+            fresh = now - frame.received_at < 1.0
+            self.action = self.planner.decide(det, self.free, None, camera_ok=fresh, now=now)
+            self.next_at = now + self.settings.decision_period_s
+        return self.action
+
+    def to_dict(self) -> dict:
+        return {"dry_run": True, "state": self.planner.state,
+                "action": self.action.to_dict() if self.action else None,
+                "free_space": self.free.to_dict() if self.free else None}
+
+
+ARROWS = {FORWARD: (0, -1), BACKWARD: (0, 1), TURN_LEFT: (-1, 0), TURN_RIGHT: (1, 0)}
+
+
+def draw_nav_overlay(img: np.ndarray, nav: NavRunner) -> np.ndarray:
+    h, w = img.shape[:2]
+    free, action = nav.free, nav.action
+    if free is not None:
+        top = free.roi_top_px
+        roi_h = h - top
+        edges = np.linspace(0, w, len(free.heights) + 1).astype(int)
+        shade = img.copy()
+        for i, height in enumerate(free.heights):
+            y = int(h - height * roi_h)
+            color = (60, 60, 230) if free.blocked[i] else (80, 200, 80)
+            cv2.rectangle(shade, (edges[i] + 2, y), (edges[i + 1] - 2, h), color, -1)
+        cv2.addWeighted(shade, 0.3, img, 0.7, 0, dst=img)
+        for i in free.corridor:
+            cv2.rectangle(img, (edges[i], top), (edges[i + 1] - 1, h - 1), (255, 255, 255), 1)
+        cv2.line(img, (0, top), (w, top), (200, 200, 200), 1)
+        y_thr = int(h - nav.floor.blocked_height * roi_h)
+        cv2.line(img, (0, y_thr), (w, y_thr), (60, 60, 230), 1, cv2.LINE_4)
+        if not free.floor_visible:
+            put_text(img, "NO FLOOR VISIBLE at the bottom edge: check camera view / floor s_max",
+                     (10, top - 10), 0.5, (60, 60, 255))
+    state = nav.planner.state
+    put_text(img, f"DRY RUN (no motors)  state: {state}", (10, 124), 0.6, (0, 255, 255), 2)
+    if action is not None:
+        put_text(img, f"NEXT: {action.label()}", (10, 152), 0.75, (0, 255, 255), 2)
+        put_text(img, action.reason[:95], (10, 176), 0.5, (230, 230, 230))
+        if action.kind in ARROWS:
+            dx, dy = ARROWS[action.kind]
+            cx, cy = w // 2, h - 70
+            cv2.arrowedLine(img, (cx, cy), (cx + dx * 70, cy + dy * 50), (0, 255, 255), 5, tipLength=0.4)
+    put_text(img, "f floor mask   x reset planner", (10, 198), 0.45, (220, 220, 220))
+    return img
+
+
+def floor_view(nav: NavRunner, frame: np.ndarray) -> np.ndarray:
+    h, w = frame.shape[:2]
+    mask = nav.free.mask
+    top = nav.free.roi_top_px
+    view = cv2.cvtColor(cv2.resize(mask, (w, h - top), interpolation=cv2.INTER_NEAREST), cv2.COLOR_GRAY2BGR)
+    put_text(view, f"floor = S <= {nav.floor.s_max} and V >= {nav.floor.v_min}  (edit config.json floor)",
+             (10, 24), 0.5, (0, 200, 255))
+    return view
+
+
 # ------------------------------------------------------------ calibration
 def open_calibration(rng: HsvRange) -> None:
     cv2.namedWindow(CAL_WIN, cv2.WINDOW_AUTOSIZE)
@@ -137,6 +225,8 @@ def save_snapshot(frame, annotated, det: Detection, info: dict, detector: ColorD
         "hsv_range": detector.ranges[det.target_color].to_dict(),
         "detector_settings": vars(detector.settings),
     }
+    if info.get("nav"):
+        record["navigation"] = info["nav"]
     (CAPTURE_DIR / f"{stem}_result.json").write_text(json.dumps(record, indent=2) + "\n")
     return CAPTURE_DIR / stem
 
@@ -150,6 +240,8 @@ def make_source(args, cfg):
 
 def run_gui(source, detector: ColorDetector, cfg: dict, args) -> None:
     color = args.color
+    nav = NavRunner(cfg) if args.navigate else None
+    floor_open = False
     proc_rate = RateMeter()
     state = {"probe_xy": None}
     last_frame = None
@@ -182,6 +274,8 @@ def run_gui(source, detector: ColorDetector, cfg: dict, args) -> None:
             last_id = frame.frame_id
             last_frame = frame
             last_det = detector.detect(frame.image, color, frame.frame_id, frame.received_wall)
+            if nav is not None:
+                nav.update(frame, last_det, detector)
             proc_rate.tick()
             now = time.monotonic()
             if last_det.detected:
@@ -210,8 +304,16 @@ def run_gui(source, detector: ColorDetector, cfg: dict, args) -> None:
                 "lost_for": None if lost_since is None else time.monotonic() - lost_since,
                 "source": getattr(source, "current_name", args.url or cfg["camera"]["stream_url"]),
                 "probe": probe,
+                "nav": nav.to_dict() if nav is not None else None,
             }
             annotated = draw_overlay(last_frame.image, last_det, info, detector.settings.center_deadband)
+            if nav is not None:
+                draw_nav_overlay(annotated, nav)
+                if floor_open:
+                    if window_closed(FLOOR_WIN):
+                        floor_open = False
+                    elif nav.free is not None:
+                        cv2.imshow(FLOOR_WIN, floor_view(nav, last_frame.image))
             cv2.imshow(MAIN_WIN, annotated)
             if calibrating:
                 mask = detector.mask(last_frame.image, color)
@@ -230,6 +332,8 @@ def run_gui(source, detector: ColorDetector, cfg: dict, args) -> None:
                 last_det = detector.detect(last_frame.image, color, last_frame.frame_id, last_frame.received_wall)
             if calibrating:
                 set_trackbars(detector.ranges[color])
+            if nav is not None:
+                nav.reset()
             print(f"target color: {color}")
         elif key == ord("c"):
             if calibrating:
@@ -249,13 +353,22 @@ def run_gui(source, detector: ColorDetector, cfg: dict, args) -> None:
             source.next_image()
         elif key == ord("p"):
             state["probe_xy"] = None
+        elif key == ord("x") and nav is not None:
+            nav.reset()
+            print("planner reset")
+        elif key == ord("f") and nav is not None:
+            if floor_open:
+                cv2.destroyWindow(FLOOR_WIN)
+            floor_open = not floor_open
     cv2.destroyAllWindows()
     cv2.waitKey(1)
 
 
-def run_headless(source, detector: ColorDetector, args) -> None:
-    """Print one JSON line per processed frame: {"detection": {...}, "metrics": {...}}."""
+def run_headless(source, detector: ColorDetector, args, cfg: dict) -> None:
+    """Print one JSON line per processed frame: {"detection": {...}, "metrics": {...}}
+    (plus "navigation": {...} with --navigate)."""
     proc_rate = RateMeter()
+    nav = NavRunner(cfg) if args.navigate else None
     deadline = time.monotonic() + args.duration if args.duration else None
     last_id = -1
     while deadline is None or time.monotonic() < deadline:
@@ -269,7 +382,11 @@ def run_headless(source, detector: ColorDetector, args) -> None:
         proc_rate.tick()
         metrics = dict(stats, proc_fps=round(proc_rate.rate(), 2),
                        age_ms=round((time.monotonic() - frame.received_at) * 1000.0, 1))
-        print(json.dumps({"detection": det.to_dict(), "metrics": metrics}), flush=True)
+        record = {"detection": det.to_dict(), "metrics": metrics}
+        if nav is not None:
+            nav.update(frame, det, detector)
+            record["navigation"] = nav.to_dict()
+        print(json.dumps(record), flush=True)
 
 
 def parse_args(argv=None):
@@ -281,6 +398,8 @@ def parse_args(argv=None):
     p.add_argument("--calibrate", action="store_true", help="open the calibration window at start")
     p.add_argument("--headless", action="store_true", help="no windows; print JSON lines to stdout")
     p.add_argument("--duration", type=float, default=0, help="headless: stop after N seconds")
+    p.add_argument("--navigate", action="store_true",
+                   help="DRY RUN: show floor check and planned moves; never sends motor commands")
     p.add_argument("-v", "--verbose", action="store_true")
     return p.parse_args(argv)
 
@@ -294,7 +413,7 @@ def main(argv=None) -> int:
     source = make_source(args, cfg)
     try:
         if args.headless:
-            run_headless(source, detector, args)
+            run_headless(source, detector, args, cfg)
         else:
             run_gui(source, detector, cfg, args)
     except KeyboardInterrupt:
