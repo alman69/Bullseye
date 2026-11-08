@@ -21,6 +21,7 @@ REQUEST_TIMEOUT_S = 1.5
 POLL_S = 0.5
 MAX_MISSED_POLLS = 4  # Four misses including request latency; device watchdog is independent.
 COMMANDS = {"squeeze", "release", "home", "stop", "relax"}
+WATCHDOG_ERROR = "Scooper stopped after losing controller contact. Check the link before moving again."
 
 
 class BoardRestarted(ConnectionError):
@@ -101,7 +102,9 @@ class ScooperLink:
         self.state, self.sequence, self.step, self.angles = new
         previous_error = self.error
         if status.get("watchdog_stopped"):
-            self.error = "Scooper stopped after losing controller contact. Check the link before moving again."
+            self.error = WATCHDOG_ERROR
+        elif self.error == WATCHDOG_ERROR:
+            self.error = None  # Clear this historical warning, never unrelated errors.
         return changed or previous_error != self.error
 
     async def connect(self):

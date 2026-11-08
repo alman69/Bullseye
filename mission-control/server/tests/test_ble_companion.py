@@ -100,6 +100,40 @@ class Runtime:
         return None
 
 
+class SlowControlPeripheral(Peripheral):
+    """Models CoreBluetooth's single pending write future per characteristic."""
+    def __init__(self):
+        super().__init__()
+        self.active_control_writes = self.max_active_control_writes = 0
+        self.overlaps = 0
+        self.control_delay = .015
+        self.heartbeat_started = asyncio.Event()
+        self.hold_action_ack = False
+        self.held_action_ack = None
+
+    async def write_gatt_char(self, uuid, data, response):
+        if uuid != COMMAND_UUID:
+            return await super().write_gatt_char(uuid, data, response)
+        if self.active_control_writes:
+            self.overlaps += 1
+            raise RuntimeError("Overlapping same-characteristic ATT writes overwrite CoreBluetooth futures")
+        self.active_control_writes += 1
+        self.max_active_control_writes = max(self.max_active_control_writes, self.active_control_writes)
+        try:
+            if data[3] == 0:
+                self.heartbeat_started.set()
+            await asyncio.sleep(self.control_delay)
+            await super().write_gatt_char(uuid, data, response)
+        finally:
+            self.active_control_writes -= 1
+
+    def notify(self, result=0, reply=0):
+        if self.hold_action_ack and result == 1 and reply and self.commands[-1][0] == 1:
+            self.held_action_ack = self.packet(result, reply)
+            return
+        super().notify(result, reply)
+
+
 def state():
     return {"mode": "hardware", "rover": "connected", "distance_cm": 31,
             "bench": {"distance_status": "live", "distance_age_ms": 123}}
@@ -198,20 +232,91 @@ async def test_runtime_pwm_fault_disables_actions_without_losing_the_display():
 
 
 async def test_stop_cancels_delayed_motion_and_uses_newer_sequence():
-    runtime = Runtime()
+    runtime = Runtime(SlowControlPeripheral())
     link = BleCompanionLink(state, runtime_factory=lambda: runtime)
     try:
         await link.connect()
         runtime.peripheral.delay_motion = True
         move = link.launch(link.command("squeeze"))
         await runtime.peripheral.started.wait()
-        assert await link.request_stop() is True
+        old_seq = runtime.peripheral.commands[-1][2]
+        stopping = link.request_stop()
+        await asyncio.sleep(.01)
+        assert not stopping.done()  # Already-issued ATT write must drain first.
+        move.cancel()  # Repeated cancellation cannot release its write lock.
+        runtime.peripheral.resume.set()
+        assert await stopping is True
         assert move.cancelled() and link.state == "holding"
-        _, old_seq = runtime.peripheral.delayed
         assert old_seq < runtime.peripheral.seq
+        assert runtime.peripheral.overlaps == 0
         runtime.peripheral.notify(3, old_seq)  # A delayed rejected ACK cannot restart anything.
         await asyncio.sleep(0)
         assert link.state == "holding" and link.busy is None
+    finally:
+        await link.close()
+
+
+async def test_heartbeat_and_action_att_writes_are_serialized(monkeypatch):
+    monkeypatch.setattr("bullseye.ble_companion.HEARTBEAT_S", .01)
+    runtime = Runtime(SlowControlPeripheral())
+    link = BleCompanionLink(state, runtime_factory=lambda: runtime)
+    try:
+        await link.connect()
+        await runtime.peripheral.heartbeat_started.wait()
+        for _ in range(4):
+            assert await link.command("home") is True
+            assert await link.command("stop") is True
+        await until(lambda: link.heartbeats_acknowledged >= 3)
+        assert link.ready and link.failure is None and runtime.connections == 1
+        assert runtime.peripheral.max_active_control_writes == 1
+        assert runtime.peripheral.overlaps == 0
+        snapshot = link.snapshot()
+        assert snapshot["heartbeats_sent"] >= 3 and snapshot["heartbeats_acknowledged"] >= 3
+        assert snapshot["heartbeat_age_ms"] is not None and snapshot["max_heartbeat_gap_ms"] < 2000
+    finally:
+        await link.close()
+
+
+async def test_application_ack_wait_does_not_block_heartbeat_writes(monkeypatch):
+    monkeypatch.setattr("bullseye.ble_companion.HEARTBEAT_S", .01)
+    runtime = Runtime(SlowControlPeripheral())
+    link = BleCompanionLink(state, runtime_factory=lambda: runtime)
+    move = None
+    try:
+        await link.connect()
+        runtime.peripheral.hold_action_ack = True
+        move = asyncio.create_task(link.command("squeeze"))
+        await until(lambda: runtime.peripheral.held_action_ack is not None)
+        sent_before = link.heartbeats_sent
+        await until(lambda: link.heartbeats_sent >= sent_before + 2)
+        assert not move.done()  # Waiting for app ACK, but the ATT lock is free.
+        runtime.peripheral.callbacks[STATUS_UUID](None, runtime.peripheral.held_action_ack)
+        assert await move is True
+        assert runtime.peripheral.overlaps == 0
+    finally:
+        if move and not move.done():
+            move.cancel()
+            await asyncio.gather(move, return_exceptions=True)
+        await link.close()
+
+
+async def test_stuck_att_write_times_out_without_sending_overlapping_stop(monkeypatch):
+    monkeypatch.setattr("bullseye.ble_companion.COMMAND_TIMEOUT_S", .08)
+    monkeypatch.setattr("bullseye.ble_companion.HEARTBEAT_S", .01)
+    runtime = Runtime(SlowControlPeripheral())
+    link = BleCompanionLink(state, runtime_factory=lambda: runtime)
+    try:
+        await link.connect()
+        runtime.peripheral.delay_motion = True
+        move = link.launch(link.command("squeeze"))
+        await runtime.peripheral.started.wait()
+        stopping = link.request_stop()
+        with pytest.raises(ConnectionError):
+            await asyncio.wait_for(stopping, 2)
+        await until(lambda: link.client is None)
+        assert move.cancelled() and runtime.peripheral.overlaps == 0
+        assert sum(opcode == 4 for opcode, _, _ in runtime.peripheral.commands) == 1  # Initial STOP only.
+        assert runtime.connections == 1 and "write failed" in link.failure
     finally:
         await link.close()
 

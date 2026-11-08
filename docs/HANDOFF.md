@@ -81,6 +81,15 @@ The combined PWM adapter now checks LEDC attach/write results, avoiding the old
 immediate-frequency-readback startup race. Actual PWM faults disable both servo
 outputs while BLE/display telemetry stay connected; the UI and backend disable
 motion separately. Native delayed-readback and failed-output tests cover this.
+BLE heartbeat/action writes are now serialized per characteristic, including
+bounded draining of canceled in-flight writes, fixing a CoreBluetooth write
+future collision. Watchdog history and idle-disconnect reporting are corrected;
+the two-second stop timeout is unchanged. The UI shows heartbeat diagnostics and
+labels its diagram as commanded positions. See [physical scooper tests](SCOOPER_TEST.md).
+The operator confirmed left-servo local movement/return on GPIO41. The original
+right servo did not move on GPIO42 despite changing commanded angles, but did
+move after its signal was switched to GPIO41. Both servos can move on that path;
+the GPIO42 path is still under crossover testing. Do not claim both outputs passed.
 The vision baseline work was saved separately on `codex/vision-baseline`,
 commit `70c528c`, before switching to this integration. Vendor firmware and
 the original standalone display/scooper sketches remain preserved.

@@ -338,3 +338,15 @@ async def test_connect_stops_existing_motion_instead_of_continuing_it():
         assert link.ready and link.state == "holding" and fake.commands == ["stop"]
     finally:
         await link.close()
+
+
+def test_watchdog_warning_clears_only_after_device_clears_its_flag():
+    fake = FakeScooper()
+    link = link_for(fake)
+    link._apply({**fake.status(), "watchdog_stopped": True})
+    assert "losing controller contact" in link.error
+    link._apply({**fake.status(), "watchdog_stopped": False})
+    assert link.error is None
+    link.error = "Some unrelated failure"
+    link._apply({**fake.status(), "watchdog_stopped": False})
+    assert link.error == "Some unrelated failure"

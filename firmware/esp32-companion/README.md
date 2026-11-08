@@ -125,6 +125,22 @@ only the laptop must be within BLE range of the S3.
 
 ## Safety and protocol
 
+For operator-run, small-angle serial tests that bypass BLE, see
+[the physical scooper baseline](../../docs/SCOOPER_TEST.md). The page diagram
+shows commanded angles; these SG90s do not provide position feedback.
+
+The Mac now serializes heartbeat and action writes on the control characteristic.
+Bleak/CoreBluetooth keeps one pending write-with-response future per handle;
+overlapping writes could time out/disconnect an otherwise working connection.
+STOP cancellation drains an already-issued write within its existing timeout
+before writing STOP. A stuck write closes the session instead of overlapping.
+The website exposes heartbeat applied/sent counts, last-send age and max gap.
+
+Watchdog history is cleared by an explicit STOP/relax or a new accepted move,
+without resuming old motion. Disconnecting after a completed sequence no longer
+claims it interrupted movement. The backend clears only the historical watchdog
+warning when the device clears its flag. The two-second watchdog is retained.
+
 - One pilot starts actions; every visitor may press STOP. Pilot loss requests
   STOP for both the UNO and companion using the existing coordinator.
 - Command acknowledgements identify a device boot and increasing command number.
@@ -186,10 +202,10 @@ Software checks use fake BLE transports and native sanitizer tests. Physical
 upload, BLE permission, combined servo/display operation and range tests remain
 operator-performed; the agent does not flash, open serial or connect live BLE.
 
-Verified November 8, 2026: **161 backend tests**, **56 frontend tests**, native
+Verified November 8, 2026: **165 backend tests**, **57 frontend tests**, native
 sanitizer checks, TypeScript and the production build pass. The combined sketch
-compiles against the installed core/libraries: **678,950 bytes flash (51% of the
-1,310,720-byte app partition)** and **34,396 bytes static RAM (10%; 293,284 bytes
+compiles against the installed core/libraries: **680,090 bytes flash (51% of the
+1,310,720-byte app partition)** and **34,404 bytes static RAM (10%; 293,276 bytes
 remaining)**. These are build-time sizes, not runtime heap or PSRAM measurements.
 
 Vision work remains on local `codex/vision-baseline` commit `70c528c`; this work

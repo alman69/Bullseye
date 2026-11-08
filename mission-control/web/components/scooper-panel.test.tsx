@@ -67,3 +67,11 @@ it("keeps BLE connected while disabling motion for an actual servo fault", () =>
   expect(onAction).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Reconnect" }).hasAttribute("disabled")).toBe(false);
 });
+
+it("shows control heartbeat diagnostics and identifies commanded positions", () => {
+  render(<ScooperPanel scooper={{ ...ready, transport: "ble", heartbeats_sent: 8, heartbeats_acknowledged: 8, heartbeat_age_ms: 120, max_heartbeat_gap_ms: 540 }} canUse onAction={vi.fn()} />);
+  expect(screen.getByText(/Control heartbeats: 8 applied \/ 8 sent/)).toBeTruthy();
+  expect(screen.getByText(/largest gap 540 ms/)).toBeTruthy();
+  expect(screen.getByText(/Commanded left 90°/)).toBeTruthy();
+  expect(screen.getByText(/no measured position feedback/)).toBeTruthy();
+});

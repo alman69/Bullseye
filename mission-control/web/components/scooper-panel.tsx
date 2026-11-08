@@ -49,7 +49,7 @@ export function ScooperPanel({ scooper, canUse, onAction }: Props) {
           <circle cx={-PIVOT_X} r="3.5" className="bench-scooper-hub" />
           <circle cx={PIVOT_X} r="3.5" className="bench-scooper-hub" />
         </svg>
-        <div><strong aria-live="polite">{describe(scooper)}</strong><small>{ready && scooper?.angles.left != null ? `Left ${scooper.angles.left}° · Right ${scooper.angles.right}° (90° = down)` : "Sticks start straight down at power-up"}</small></div>
+        <div><strong aria-live="polite">{describe(scooper)}</strong><small>{ready && scooper?.angles.left != null ? `Commanded left ${scooper.angles.left}° · right ${scooper.angles.right}° (90° = down)` : "Sticks start straight down at power-up"}</small></div>
       </div>
       <Button className="primary-button bench-scooper-squeeze" disabled={!canMove} onClick={() => onAction("scooper_squeeze")}><Hand size={16} />Squeeze</Button>
       <div className="bench-scooper-row">
@@ -60,7 +60,9 @@ export function ScooperPanel({ scooper, canUse, onAction }: Props) {
       {scooper?.error && <p className="bench-inline-error" role="status">{scooper.error}</p>}
       {!canUse && <p className="bench-help">Claim controls in the Pilot seat panel to connect. Rover driving can stay disabled.</p>}
       {ble && <p className="bench-help">One BLE connection powers the display updates and scooper controls. Stop the separate send-display.sh sender before connecting here. {ready ? `BLE connected. ${scooper?.display_updates ?? 0} display updates acknowledged.` : "Claim controls, then Connect."}</p>}
+      {ble && scooper?.heartbeats_sent != null && <p className="bench-help">Control heartbeats: {scooper.heartbeats_acknowledged ?? 0} applied / {scooper.heartbeats_sent} sent · last send {scooper.heartbeat_age_ms == null ? "pending" : `${scooper.heartbeat_age_ms} ms ago`} · largest gap {scooper.max_heartbeat_gap_ms ?? 0} ms.</p>}
       <p className="bench-help">Squeeze: out 30°, then in 80° past straight down to lift the block. STOP holds the last commanded angles. {ble ? "Rover Wi-Fi is unchanged." : "Legacy standalone scooper uses the rover Wi-Fi."}</p>
+      <p className="bench-help">The diagram shows firmware-commanded angles. These servos provide no measured position feedback; observe the mechanism to verify movement.</p>
     </div>
   </section>;
 }

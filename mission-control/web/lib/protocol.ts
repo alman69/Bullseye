@@ -84,6 +84,10 @@ export type ScooperState = {
   display_updates?: number;
   ble_connected?: boolean;
   servo_ready?: boolean | null;
+  heartbeats_sent?: number;
+  heartbeats_acknowledged?: number;
+  heartbeat_age_ms?: number | null;
+  max_heartbeat_gap_ms?: number;
 };
 export type CommandPayload = Record<string, unknown>;
 export type LinkLatency = {

@@ -83,9 +83,13 @@ void pwmChecks() {
   assert(control.servoReady() && output.healthy() && hal.errors == 0);
   assert(hal.pending[41] == 1188 && hal.pending[42] == 1188);
   hal.nextCycle(); assert(hal.readFrequency(41) == 50 && hal.readFrequency(42) == 50);
-  assert(control.local(Command::Relax, 20) == nullptr && output.healthy());
+  assert(control.setJoint(1, 80, 30));
+  for (uint32_t now = 10; now <= 1000; now += 10) control.tick(now, false);
+  assert(control.arm().angle(1) == 80 && control.arm().angle(0) == 90);
+  assert(hal.pending[42] == 1274 && hal.pending[41] == 1188); // Right logical80 mirrors to physical100 on GPIO42 only.
+  assert(control.local(Command::Relax, 1020) == nullptr && output.healthy());
   assert(!hal.on[41] && !hal.on[42] && control.servoReady());
-  assert(control.local(Command::Home, 30) == nullptr && output.initialized());
+  assert(control.local(Command::Home, 1030) == nullptr && output.initialized());
   output.write(0, -10); assert(hal.pending[41] == 410);
   output.write(0, 190); assert(hal.pending[41] == 1966);
   hal.failWrite = 42; output.write(1, 100);
@@ -176,6 +180,27 @@ void orderAndTimeoutChecks() {
   CommandOrder wrapped; wrapped.begin(9); assert(wrapped.accept(9, UINT32_MAX)); wrapped.fence();
   assert(wrapped.sequence() == UINT32_MAX && !wrapped.accept(9, 1));
 }
+void watchdogHistoryChecks() {
+  Servos output; Control<Servos> control(output); control.begin(0, 42); control.tick(0, true);
+  assert(control.execute(request(Command::Squeeze, 1), 0) == nullptr);
+  for (uint32_t now = 0; now <= 6000; now += 100) {
+    if (now % 500 == 0) control.execute(request(Command::Status, 0), now);
+    control.tick(now, true);
+  }
+  assert(control.arm().state() == scooper::State::Holding);
+  control.connectionLost();
+  assert(!control.watchdogStopped() && control.stopReason() == StopReason::None); // Idle disconnect is not an aborted movement.
+  assert(control.execute(request(Command::Release, 2), 6100) == nullptr);
+  control.tick(6200, true); control.tick(8100, true);
+  assert(control.watchdogStopped() && control.stopReason() == StopReason::ContactTimeout);
+  const auto stopped = control.arm().angle(0);
+  assert(control.execute(request(Command::Stop, 4), 8110) == nullptr);
+  assert(!control.watchdogStopped() && control.stopReason() == StopReason::None);
+  control.tick(9000, true); assert(control.arm().angle(0) == stopped); // Clearing history never resumes a sequence.
+  assert(control.execute(request(Command::Squeeze, 5), 9010) == nullptr);
+  control.connectionLost(); assert(control.stopReason() == StopReason::LinkLost);
+  assert(control.setJoint(0, 90, 30)); assert(!control.watchdogStopped());
+}
 struct Screen {
   int writes = 0;
   void fillScreen(uint16_t) { ++writes; }
@@ -218,6 +243,6 @@ void sharedLoopChecks() {
   assert(telemetry.face.mood(5000) == bullseye::Mood::Curious);
 }
 int main() {
-  httpChecks(); pwmChecks(); bleChecks(); orderAndTimeoutChecks(); sharedLoopChecks();
+  httpChecks(); pwmChecks(); bleChecks(); orderAndTimeoutChecks(); watchdogHistoryChecks(); sharedLoopChecks();
   std::cout << "Combined companion checks passed: delayed PWM readback, HAL faults, BLE commands/status, bounded mailboxes, ordered STOP, watchdog, telemetry, face animation and servo updates.\n";
 }

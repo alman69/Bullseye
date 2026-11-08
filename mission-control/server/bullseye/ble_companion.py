@@ -62,16 +62,26 @@ class BleCompanionLink(ScooperLink):
         self.last_status_at = 0
         self.display_updates = 0
         self.servo_ready = None
+        self.control_write_lock = asyncio.Lock()
+        self.heartbeats_sent = self.heartbeats_acknowledged = 0
+        self.last_heartbeat_at = None
+        self.max_heartbeat_gap_ms = 0
 
     def snapshot(self):
         return {**super().snapshot(), "transport": "ble", "display_updates": self.display_updates,
-                "ble_connected": self.client is not None and self.client.is_connected, "servo_ready": self.servo_ready}
+                "ble_connected": self.client is not None and self.client.is_connected, "servo_ready": self.servo_ready,
+                "heartbeats_sent": self.heartbeats_sent, "heartbeats_acknowledged": self.heartbeats_acknowledged,
+                "heartbeat_age_ms": None if self.last_heartbeat_at is None else max(0, int((time.monotonic() - self.last_heartbeat_at) * 1000)),
+                "max_heartbeat_gap_ms": self.max_heartbeat_gap_ms}
 
     async def connect(self):
         await self.close()
         self.status, self.error, self.failure = "connecting", None, None
         self.display_updates = 0
         self.servo_ready = None
+        self.heartbeats_sent = self.heartbeats_acknowledged = 0
+        self.last_heartbeat_at = None
+        self.max_heartbeat_gap_ms = 0
         self.on_change()
         ready = asyncio.get_running_loop().create_future()
         self.worker = asyncio.create_task(self._run(ready))
@@ -109,6 +119,8 @@ class BleCompanionLink(ScooperLink):
             elif self.error == PWM_FAULT:
                 self.error = None
             self.last_status_at = time.monotonic()
+            if result == 1 and reply == 0:
+                self.heartbeats_acknowledged += 1
             if self.pending and not self.pending[1].done() and (reply == self.pending[0] or reply == 0 and result >= 2):
                 self.pending[1].set_result(True if result == 1 else RESULTS.get(result, "Missing command acknowledgement"))
             self.on_change()
@@ -148,7 +160,12 @@ class BleCompanionLink(ScooperLink):
                         raise ConnectionError("Display telemetry stopped")
                     if time.monotonic() - self.last_status_at > STATUS_TIMEOUT_S:
                         raise ConnectionError("Companion BLE status timed out; reconnect")
-                    await asyncio.wait_for(client.write_gatt_char(COMMAND_UUID, encode_command("heartbeat", self.boot_id, 0), response=True), COMMAND_TIMEOUT_S)
+                    await self._write_control(client, encode_command("heartbeat", self.boot_id, 0))
+                    sent_at = time.monotonic()
+                    if self.last_heartbeat_at is not None:
+                        self.max_heartbeat_gap_ms = max(self.max_heartbeat_gap_ms, int((sent_at - self.last_heartbeat_at) * 1000))
+                    self.last_heartbeat_at = sent_at
+                    self.heartbeats_sent += 1
                     await asyncio.sleep(HEARTBEAT_S)
                 raise ConnectionError("Companion BLE disconnected; press Reconnect")
         except asyncio.CancelledError:
@@ -170,6 +187,47 @@ class BleCompanionLink(ScooperLink):
             if self.pending and not self.pending[1].done():
                 self.pending[1].set_exception(ConnectionError(self.error or "Companion BLE session closed"))
             self.on_change()
+
+    async def _write_control(self, client, data):
+        """Serialize same-handle ATT writes, including an already-issued canceled write.
+
+        CoreBluetooth/Bleak has one write-with-response future per characteristic.
+        A heartbeat and an action must not overwrite that future. If STOP cancels
+        its caller, the ATT transaction drains under the lock before STOP writes;
+        a bounded timeout instead poisons/closes the session, never overlaps it.
+        Application ACK waiting happens outside this lock.
+        """
+        token = self.session_token
+        async with self.control_write_lock:
+            if client is None or token is not self.session_token or client is not self.client or not client.is_connected or self.failure:
+                raise ConnectionError(self.failure or "Companion BLE session changed before write")
+            transaction = asyncio.create_task(asyncio.wait_for(
+                client.write_gatt_char(COMMAND_UUID, data, response=True), COMMAND_TIMEOUT_S))
+            canceled = False
+            while not transaction.done():
+                try:
+                    await asyncio.shield(transaction)
+                except asyncio.CancelledError:
+                    # A second cancel must not release the lock over an ATT
+                    # write that is still using CoreBluetooth's handle future.
+                    canceled = True
+                except Exception:
+                    break
+            error = None
+            if transaction.cancelled():
+                error = ConnectionError("BLE control write was canceled by the transport")
+            else:
+                try:
+                    transaction.result()
+                except Exception as exc:
+                    error = exc
+            if error is not None:
+                self.failure = f"BLE control write failed: {str(error) or type(error).__name__}"
+                self.status = "error"
+            if canceled:
+                raise asyncio.CancelledError
+            if error is not None:
+                raise ConnectionError(self.failure) from error
 
     async def _telemetry(self, client, acks):
         sequence = 1
@@ -205,7 +263,7 @@ class BleCompanionLink(ScooperLink):
         self.pending, self.busy = (sequence, future), name
         self.on_change()
         try:
-            await asyncio.wait_for(self.client.write_gatt_char(COMMAND_UUID, data, response=True), COMMAND_TIMEOUT_S)
+            await self._write_control(self.client, data)
             result = await asyncio.wait_for(future, COMMAND_TIMEOUT_S)
             if generation != self.generation and name != "stop":
                 return "canceled by STOP"

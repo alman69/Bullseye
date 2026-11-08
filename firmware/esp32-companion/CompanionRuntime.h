@@ -14,10 +14,14 @@ class Runtime {
     output &= servos_.initialized();
     control_.outputReady(output);
     if (!output) Serial.println("Scooper PWM failed; motion disabled until restart.");
-    Serial.println("Combined BLE display + scooper ready. Serial: status, stop, relax, home, squeeze, release, set 1|2 degrees [speed].");
+    Serial.println("Combined BLE display + scooper ready. Serial: status, pwm, stop, relax, home, squeeze, release, set 1|2 degrees [speed].");
     printStatus();
   }
-  void poll(uint32_t now) { readSerial(now); updateMotion(millis()); }
+  void poll(uint32_t now) {
+    if (havePoll_) { const uint32_t gap = now - lastPoll_; if (gap > maxLoopGap_) maxLoopGap_ = gap; }
+    havePoll_ = true; lastPoll_ = now;
+    readSerial(now); updateMotion(millis());
+  }
   // Main loop only. Epoch fencing handles a disconnect/reconnect between ticks.
   void link(bool connected, uint32_t epoch, uint32_t now) {
     if (epoch != epoch_) { control_.connectionLost(); epoch_ = epoch; }
@@ -25,6 +29,11 @@ class Runtime {
   }
   void updateMotion(uint32_t now) {
     control_.outputReady(servos_.healthy());
+    if (control_.watchdogStopped() && reportedStop_ != control_.stopReason()) {
+      reportedStop_ = control_.stopReason();
+      Serial.printf("Scooper stopped: %s control_age_ms=%lu max_loop_gap_ms=%lu\n", stopReasonName(reportedStop_),
+        static_cast<unsigned long>(control_.contactAge(now)), static_cast<unsigned long>(maxLoopGap_));
+    } else if (!control_.watchdogStopped()) reportedStop_ = StopReason::None;
     control_.tick(now, connected_);
     control_.outputReady(servos_.healthy());
   }
@@ -43,11 +52,23 @@ class Runtime {
     Serial.printf("BLE scooper boot=%lu seq=%lu ready=%d state=%s left=%d right=%d watchdog=%d\n",
       static_cast<unsigned long>(control_.order().boot()), static_cast<unsigned long>(control_.order().sequence()),
       control_.servoReady(), scooper::stateName(arm.state()), arm.angle(0), arm.angle(1), control_.watchdogStopped());
+    Serial.printf("Diagnostics: stop_reason=%s control_age_ms=%lu max_loop_gap_ms=%lu PWM_fault=%s\n",
+      stopReasonName(control_.stopReason()), static_cast<unsigned long>(control_.contactAge(millis())),
+      static_cast<unsigned long>(maxLoopGap_), pwmFaultName(servos_.fault()));
   }
   void serialCommand() {
     line_[lineLength_] = '\0';
     char* name = strtok(line_, " \t"); if (!name) return;
     if (!strcmp(name, "status")) { printStatus(); return; }
+    if (!strcmp(name, "pwm")) {
+      for (uint8_t i = 0; i < scooper::kJointCount; ++i) {
+        const uint8_t pin = scooper::kJoints[i].pin;
+        Serial.printf("PWM %s GPIO%u: frequency_hz=%lu duty=%lu / 16384\n", scooper::kJoints[i].name, pin,
+          static_cast<unsigned long>(ledcReadFreq(pin)), static_cast<unsigned long>(ledcRead(pin)));
+      }
+      Serial.println("Readback is PWM register state, not measured shaft position. Wait >20 ms after a move before reading.");
+      return;
+    }
     if (!strcmp(name, "x")) name = const_cast<char*>("stop");
     if (!strcmp(name, "set")) {
       uint32_t joint = 0, degrees = 0, speed = scooper::kDefaultDegPerSec;
@@ -81,6 +102,9 @@ class Runtime {
   char line_[64] = {};
   size_t lineLength_ = 0;
   uint32_t lineStarted_ = 0, epoch_ = 0;
+  uint32_t lastPoll_ = 0, maxLoopGap_ = 0;
+  StopReason reportedStop_ = StopReason::None;
+  bool havePoll_ = false;
   bool connected_ = false, lineOverflow_ = false;
 };
 }  // namespace companion
