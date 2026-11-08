@@ -3,7 +3,6 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Cable, CircleDot, Radio, Shi
 import HalftoneNebula from "@/components/ui/halftone-nebula";
 import { Button } from "@/components/ui/button";
 import { CameraView } from "@/components/camera-view";
-import { ScooperPanel } from "@/components/scooper-panel";
 import { VisionCalibration } from "@/components/vision-calibration";
 import { VisionPanel } from "@/components/vision-panel";
 import { useVisionUi } from "@/hooks/use-vision-ui";
@@ -14,7 +13,7 @@ const SKY = { planetX: 0.74, planetY: 0.2 };
 
 export default function RoverDemo() {
   const { state, connected, isPilot, act, stop, error, clearError, latency } = useMission("/ws/bench", "/api/bench/stop");
-  const visionUi = useVisionUi(act);
+  const visionUi = useVisionUi(act, connected && isPilot);
   const [speed, setSpeed] = useState(40);
   const [duration, setDuration] = useState(200);
   const stage = useRef<HTMLDivElement>(null);
@@ -102,7 +101,6 @@ export default function RoverDemo() {
                 <p className="bench-help">Distance is uncalibrated; obstacle avoidance is off. Driving briefly pauses for distance updates. STOP and focus loss disable controls.</p>
               </div>
             </section>
-            <ScooperPanel scooper={bench?.scooper} canUse={connected && isPilot} onAction={(kind) => void act(kind)} />
           </div>
         </div>
         <section className="panel bench-log"><div className="panel-heading"><div className="heading-icon"><Terminal size={16} /><h2>Activity log</h2></div><span className="micro">LATEST {state?.events.length || 0} EVENTS</span></div><div className="bench-log-body">{state?.events.slice(0, 12).map((event) => <div className={`bench-log-row ${event.level}`} key={event.id}><time>{new Date(event.at).toLocaleTimeString()}</time><p>{event.message}</p></div>) || <p>Waiting for the bench server. Launch mission-control/run-rover-demo.sh.</p>}</div></section>

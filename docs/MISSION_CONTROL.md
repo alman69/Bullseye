@@ -1,5 +1,9 @@
 # Bullseye Mission Control
 
+**Vision update:** the default arena palette detects six materials, supports immediate click-to-calibrate
+colors, and uses freehand rover outlines. See [Simple vision](SIMPLE_VISION.md) for the current workflow;
+older classifier calibration instructions below are retained as legacy reference.
+
 A laptop-hosted React/TypeScript dashboard with a FastAPI coordinator, a clearly
 labeled simulator, and a shared camera relay. No existing firmware is changed.
 The mission dashboard's hardware adapter intentionally has all motion/mission

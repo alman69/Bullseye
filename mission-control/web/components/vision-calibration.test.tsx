@@ -32,6 +32,7 @@ const summary: VisionSummary = {
 
 function ui(overrides: Partial<VisionUi> = {}): VisionUi {
   return {
+    frozen: null, freezing: false, freezeError: null, resumeLive: vi.fn(),
     overlay: { show: true, floor: true, mask: "off", samplingClass: null },
     show: true,
     setShow: vi.fn(),
@@ -48,21 +49,21 @@ function ui(overrides: Partial<VisionUi> = {}): VisionUi {
 }
 
 describe("VisionCalibration", () => {
-  it("starts sampling a class and fits the model", () => {
+  it("calibrates directly from a class without a separate fit step", () => {
     const act = vi.fn().mockResolvedValue(true);
     const view = ui();
-    render(<VisionCalibration vision={summary} ui={view} canAct act={act} />);
-    fireEvent.click(screen.getByRole("tab", { name: /Colors/ }));
+    render(<VisionCalibration vision={{ ...summary, mode: "palette" }} ui={view} canAct act={act} />);
     fireEvent.click(screen.getByRole("button", { name: /Floor/ }));
     expect(view.setSamplingClass).toHaveBeenCalledWith("floor");
-    fireEvent.click(screen.getByRole("button", { name: "Fit color model" }));
-    expect(act).toHaveBeenCalledWith("vision_fit");
-    expect(screen.getByRole("table", { name: "Confusion table" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Fit color model" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Use built-in colors" }));
+    expect(act).toHaveBeenCalledWith("vision_palette_reset", {});
   });
 
   it("captures stop-line distances and saves the step table", () => {
     const act = vi.fn().mockResolvedValue(true);
     render(<VisionCalibration vision={summary} ui={ui()} canAct act={act} />);
+    fireEvent.click(screen.getByRole("button", { name: "Advanced settings" }));
     fireEvent.click(screen.getByRole("tab", { name: /Stop line/ }));
     fireEvent.click(screen.getByRole("button", { name: "15 cm" }));
     fireEvent.click(screen.getByRole("button", { name: "Capture at 15 cm" }));
@@ -76,32 +77,26 @@ describe("VisionCalibration", () => {
   it("disables editing for viewers", () => {
     render(<VisionCalibration vision={summary} ui={ui()} canAct={false} act={vi.fn()} />);
     fireEvent.click(screen.getByRole("tab", { name: /Colors/ }));
-    expect((screen.getByRole("button", { name: "Fit color model" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Use built-in colors" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("clears all samples after confirmation", () => {
-    const act = vi.fn().mockResolvedValue(true);
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    render(<VisionCalibration vision={summary} ui={ui()} canAct act={act} />);
-    fireEvent.click(screen.getByRole("tab", { name: /Colors/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Clear all samples" }));
-    expect(act).toHaveBeenCalledWith("vision_clear_samples", {});
+  it("explains legacy mode and exposes the six materials", () => {
+    render(<VisionCalibration vision={summary} ui={ui()} canAct act={vi.fn()} />);
+    expect(screen.getByRole("alert").textContent).toMatch(/Legacy detection/);
+    expect(screen.getByRole("button", { name: /Black home base/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Brown wall/ })).toBeTruthy();
   });
 
-  it("warns when samples exist but no model is fitted", () => {
-    render(<VisionCalibration vision={{ ...summary, model_fitted: false }} ui={ui()} canAct act={vi.fn()} />);
-    fireEvent.click(screen.getByRole("tab", { name: /Colors/ }));
-    expect(screen.getByRole("alert").textContent).toMatch(/not fitted yet/);
-  });
-
-  it("starts with camera settings and draws rover-mask boxes", () => {
+  it("starts with colors and traces rover outlines", () => {
     const view = ui();
-    render(<VisionCalibration vision={{ ...summary, camera: { controls: {}, url_set: true, ok: null, message: "Not sent yet.", at: null } }} ui={view} canAct act={vi.fn()} />);
-    expect(screen.getByText(/Color saturation/)).toBeTruthy();                 // camera tab is first
+    render(<VisionCalibration vision={summary} ui={view} canAct act={vi.fn()} />);
+    expect(screen.getByRole("tab", { name: "Colors" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByText(/Color saturation/)).toBeNull();
     fireEvent.click(screen.getByRole("tab", { name: /Rover mask/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Draw mask boxes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Trace rover outline" }));
     expect(view.setSamplingClass).toHaveBeenCalledWith("__rover_mask__");
   });
+
 });
 
 describe("VisionPanel", () => {

@@ -46,7 +46,7 @@ board's octal PSRAM uses them.
 
 | SG90 wire | Left stick | Right stick |
 | --- | --- | --- |
-| Signal (orange) | **GPIO41** | **GPIO42** |
+| Signal (orange) | **GPIO39** | **GPIO40** |
 | V+ (red) | Separate 5 V supply, at least 1.5 A | same supply |
 | GND (brown) | Supply GND **and** an ESP32 GND pin | same |
 

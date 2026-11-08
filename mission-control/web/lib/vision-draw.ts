@@ -81,6 +81,22 @@ export function drawVision(
       label("ignored", x0 * w + 6, y0 * h + font, "rgba(255,255,255,0.8)");
     }
 
+    for (const polygon of f.mask_polygons ?? []) {
+      ctx.beginPath();
+      polygon.forEach(([x, y], i) => i ? ctx.lineTo(x * w, y * h) : ctx.moveTo(x * w, y * h));
+      ctx.closePath(); ctx.fillStyle = "rgba(20,20,30,0.55)"; ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+    for (const [name, material] of Object.entries(f.materials ?? {})) {
+      if (name === f.target) continue;
+      ctx.strokeStyle = CLASS_HEX[name] ?? "#fff"; ctx.lineWidth = 2;
+      for (const [x, y, bw, bh] of material.boxes) {
+        ctx.strokeRect(x * w, y * h, bw * w, bh * h);
+        label(name === "cardboard" ? "WALL" : name === "home" ? "HOME?" : name.toUpperCase(),
+          x * w + 3, Math.max(font, y * h - 5), CLASS_HEX[name] ?? "#fff");
+      }
+    }
+
     // Ground lines from the stop-line calibration.
     const lines: [number | null, string, string, number][] = [
       [f.lines.horizon, "horizon", "rgba(180,180,180,0.8)", 1],

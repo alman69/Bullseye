@@ -165,6 +165,16 @@ def create_app(settings: Settings | None = None, *, bench_bridge=None):
             raise HTTPException(404, "Vision is disabled (BULLSEYE_VISION=0).")
         return vision.summary()
 
+    @app.get("/api/vision/calibration-frame")
+    async def vision_calibration_frame(response: Response):
+        response.headers["Cache-Control"] = "no-store"
+        if vision is None or not vision.available:
+            raise HTTPException(503, "Vision is not available.")
+        try:
+            return await asyncio.to_thread(vision.calibration_frame)
+        except CommandError as error:
+            raise HTTPException(409, str(error)) from error
+
     @app.get("/api/vision/mask.jpg")
     async def vision_mask(kind: str = "target"):
         if vision is None or not vision.available:

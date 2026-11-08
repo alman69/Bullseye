@@ -4,6 +4,7 @@ A project for UB Hackathon 2026.
 
 Camera-guided sample missions with a laptop-hosted Mission Control dashboard.
 
+- [Simple arena vision: click-to-calibrate colors and trace the rover mask](docs/SIMPLE_VISION.md)
 - [Mission Control setup, simulator, camera relay, and integration API](docs/MISSION_CONTROL.md)
 - [Firmware setup and known hardware behavior](docs/FIRMWARE_SETUP.md)
 - [Direct ELEGOO connection: no-app, no-motion bench test](docs/ELEGOO_CONNECTION.md)

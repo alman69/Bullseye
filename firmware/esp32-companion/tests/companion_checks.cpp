@@ -60,7 +60,7 @@ struct DelayedPwm {
   int failAttach = -1, failWrite = -1, failDetach = -1, errors = 0;
   const char* stage = "";
   bool attach(uint8_t pin, uint32_t hz, uint8_t bits) {
-    assert((pin == 41 || pin == 42) && hz == 50 && bits == 14);
+    assert((pin == 39 || pin == 40) && hz == 50 && bits == 14);
     if (pin == failAttach) return false;
     on[pin] = true; return true;
   }
@@ -73,39 +73,39 @@ struct DelayedPwm {
   void low(uint8_t pin) { on[pin] = false; pending[pin] = applied[pin] = 0; }
   void error(const char* name, uint8_t) { ++errors; stage = name; }
   uint32_t readFrequency(uint8_t pin) const { return on[pin] && applied[pin] ? 50 : 0; }
-  void nextCycle() { for (uint8_t pin : {41, 42}) if (on[pin]) applied[pin] = pending[pin]; }
+  void nextCycle() { for (uint8_t pin : {39, 40}) if (on[pin]) applied[pin] = pending[pin]; }
 };
 void pwmChecks() {
   DelayedPwm hal; ServoPwm<DelayedPwm> output(hal); Control<ServoPwm<DelayedPwm>> control(output);
   assert(control.begin(0, 42));
-  assert(hal.readFrequency(41) == 0 && hal.readFrequency(42) == 0); // Old code falsely failed startup.
+  assert(hal.readFrequency(39) == 0 && hal.readFrequency(40) == 0); // Old code falsely failed startup.
   control.outputReady(output.initialized());
   assert(control.servoReady() && output.healthy() && hal.errors == 0);
-  assert(hal.pending[41] == 1188 && hal.pending[42] == 1188);
-  hal.nextCycle(); assert(hal.readFrequency(41) == 50 && hal.readFrequency(42) == 50);
+  assert(hal.pending[39] == 1188 && hal.pending[40] == 1188);
+  hal.nextCycle(); assert(hal.readFrequency(39) == 50 && hal.readFrequency(40) == 50);
   assert(control.setJoint(1, 80, 30));
   for (uint32_t now = 10; now <= 1000; now += 10) control.tick(now, false);
   assert(control.arm().angle(1) == 80 && control.arm().angle(0) == 90);
-  assert(hal.pending[42] == 1274 && hal.pending[41] == 1188); // Right logical80 mirrors to physical100 on GPIO42 only.
+  assert(hal.pending[40] == 1274 && hal.pending[39] == 1188); // Right logical80 mirrors to physical100 on GPIO40 only.
   assert(control.local(Command::Relax, 1020) == nullptr && output.healthy());
-  assert(!hal.on[41] && !hal.on[42] && control.servoReady());
+  assert(!hal.on[39] && !hal.on[40] && control.servoReady());
   assert(control.local(Command::Home, 1030) == nullptr && output.initialized());
-  output.write(0, -10); assert(hal.pending[41] == 410);
-  output.write(0, 190); assert(hal.pending[41] == 1966);
-  hal.failWrite = 42; output.write(1, 100);
+  output.write(0, -10); assert(hal.pending[39] == 410);
+  output.write(0, 190); assert(hal.pending[39] == 1966);
+  hal.failWrite = 40; output.write(1, 100);
   assert(!output.healthy() && output.fault() == PwmFault::Write && output.faultJoint() == 1);
-  assert(!hal.on[41] && !hal.on[42] && !strcmp(hal.stage, "write"));
+  assert(!hal.on[39] && !hal.on[40] && !strcmp(hal.stage, "write"));
   control.outputReady(output.healthy()); assert(!control.servoReady() && control.arm().state() == scooper::State::Relaxed);
-  output.attach(0); assert(!hal.on[41] && hal.errors == 1); // Never silently rearm.
-  DelayedPwm attachHal; attachHal.failAttach = 42;
+  output.attach(0); assert(!hal.on[39] && hal.errors == 1); // Never silently rearm.
+  DelayedPwm attachHal; attachHal.failAttach = 40;
   ServoPwm<DelayedPwm> attachFailure(attachHal); Control<ServoPwm<DelayedPwm>> failed(attachFailure);
   failed.begin(0, 43); failed.outputReady(attachFailure.initialized());
-  assert(!failed.servoReady() && !attachHal.on[41] && !attachHal.on[42] && attachFailure.fault() == PwmFault::Attach);
+  assert(!failed.servoReady() && !attachHal.on[39] && !attachHal.on[40] && attachFailure.fault() == PwmFault::Attach);
   DelayedPwm detachHal; ServoPwm<DelayedPwm> detaching(detachHal);
-  detaching.attach(0); detaching.write(0, 90); detachHal.failDetach = 41; detaching.detach(0);
-  assert(!detaching.healthy() && detaching.fault() == PwmFault::Detach && !detachHal.on[41]);
+  detaching.attach(0); detaching.write(0, 90); detachHal.failDetach = 39; detaching.detach(0);
+  assert(!detaching.healthy() && detaching.fault() == PwmFault::Detach && !detachHal.on[39]);
   DelayedPwm nanHal; ServoPwm<DelayedPwm> nanOutput(nanHal); nanOutput.attach(0); nanOutput.write(0, NAN);
-  assert(!nanOutput.healthy() && !nanHal.on[41] && nanOutput.fault() == PwmFault::Argument);
+  assert(!nanOutput.healthy() && !nanHal.on[39] && nanOutput.fault() == PwmFault::Argument);
 }
 Request request(Command command, uint32_t sequence, uint32_t boot = 42) { return {command, boot, sequence, 0}; }
 CommandFrame bleFrame(uint8_t opcode, uint32_t sequence, uint32_t epoch = 1) {

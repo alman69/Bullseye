@@ -69,7 +69,7 @@ everything up to PR #10. Things change fast during the hackathon: **check `git l
 **Combined integration prepared on `codex/display-scooper`:** the latest Wi-Fi
 scooper branch is the base. `firmware/esp32-companion/bullseye_companion/`
 contains one generated `.ino` for the same S3's animated display, BLE telemetry
-and GPIO41/42 scooper **over one BLE connection owned by Mission Control**.
+and GPIO39/40 scooper **over one BLE connection owned by Mission Control**.
 The combined sketch no longer joins Wi-Fi; the Mac's rover Wi-Fi is unchanged.
 Stop `send-display.sh`, restart the backend, then Claim controls → Scooper Connect
 to connect both functions. The existing `/bench` Scooper panel is retained.
@@ -90,8 +90,27 @@ Latest operator follow-up: both local `set 1` (left) and `set 2` (right) now
 physically work at 80°, 90° and 110°. An earlier right-output problem resolved
 after troubleshooting, but the operator is unsure which adjustment fixed it;
 do not claim a confirmed root cause. Both small-range local command paths have
-passed; BLE-controlled motion and the full squeeze/release range are not yet
-physically verified.
+passed. The operator subsequently reported both servos passing the full
+individual range tests with unchanged boot IDs. Simultaneous BLE-controlled
+Squeeze still disconnects; it is not physically verified as a complete mission
+action. Servo supply is from the S3/USB 5V pin via a breadboard split, sharing
+the battery with the display/S3. The operator then confirmed **BLE stays
+connected through Squeeze with both servos completely disconnected**. That
+isolates the failure to conditions involving the attached servos rather than
+the unloaded command sequence; power delivery/noise/wiring under load are
+leading suspects, not measured/proven electrical diagnoses. Source voltage,
+current rating and available separate servo supply are being clarified before
+a power-path isolation test. Do not join separate positive supplies or backfeed
+a USB-powered S3 header.
+Latest signal-isolation follow-up: the operator reports that either attached
+servo causes display flickering even without BLE, and disconnecting just the
+signal wires clears it. Reported boot IDs remain unchanged in serial checks;
+a full S3 reboot is therefore not established. Power remains shared through a
+breadboard, with supply voltage/current rating unknown. The operator moved
+signals to GPIO39/40; the shared configuration and generated companion sketch
+now assign **left=39, right=40**. Upload and physical verification are pending;
+this pin change is a diagnostic test, not a confirmed fix. Avoid GPIO35–37
+(octal memory) and GPIO47/48 (1.8 V logic on the N32R16V module).
 The vision baseline work was saved separately on `codex/vision-baseline`,
 commit `70c528c`, before switching to this integration. Vendor firmware and
 the original standalone display/scooper sketches remain preserved.

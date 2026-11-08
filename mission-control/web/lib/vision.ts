@@ -8,7 +8,7 @@ export type VisionFrame = {
   w: number;
   h: number;
   target: string;
-  mode: "hsv" | "classifier";
+  mode: "hsv" | "classifier" | "palette";
   dry_run: true;
   detection: {
     detected: boolean;
@@ -22,6 +22,8 @@ export type VisionFrame = {
   center: [number, number] | null;
   others: [number, number, number, number][];
   deadband: number;
+  materials?: Record<string, MaterialDetection>;
+  mask_polygons?: [number, number][][];
   mask_boxes?: [number, number, number, number][];
   free: {
     heights: number[];
@@ -43,11 +45,13 @@ export type VisionSummary = {
   error: string | null;
   dry_run?: boolean;
   target?: string;
-  mode?: "hsv" | "classifier";
+  mode?: "hsv" | "classifier" | "palette";
   classes?: string[];
   model_fitted?: boolean;
   camera?: { controls: Record<string, number>; url_set: boolean; ok: boolean | null; message: string; at: string | null };
-  rover_mask?: { boxes: [number, number, number, number][] };
+  rover_mask?: { boxes: [number, number, number, number][]; polygons?: [number, number][][] };
+  palette?: { counts: Record<string, number>; can_undo: boolean };
+  materials?: Record<string, MaterialDetection>;
   detected?: boolean;
   direction?: string | null;
   horizontal_error?: number | null;
@@ -71,6 +75,9 @@ export type VisionSummary = {
   tuning?: Record<string, number>;
 };
 
+export type MaterialDetection = { detected: boolean; count: number; boxes: [number, number, number, number][] };
+export type FrozenVision = { id: string; image: string; frame: VisionFrame };
+
 export type MaskView = "off" | "target" | "floor";
 
 /** What the camera overlay shows, chosen in the vision panel. */
@@ -79,6 +86,9 @@ export type VisionOverlayOptions = {
   floor: boolean;
   mask: MaskView;
   samplingClass: string | null; // when set, dragging on the video adds samples of this class
+  frozen?: FrozenVision | null;
+  onResumeLive?: () => void;
+  onMaskPolygon?: (points: [number, number][]) => void;
   onSampleBox?: (box: [number, number, number, number]) => void;
 };
 
@@ -100,8 +110,8 @@ export const SAMPLE_CLASSES: { id: string; label: string; hex: string; key: stri
   { id: "blue", label: "Blue", hex: "#79aaf4", key: "3" },
   { id: "yellow", label: "Yellow", hex: "#f2d15c", key: "4" },
   { id: "floor", label: "Floor", hex: "#e9e6de", key: "5" },
-  { id: "cardboard", label: "Cardboard", hex: "#c0925e", key: "6" },
-  { id: "obstacle", label: "Obstacle", hex: "#ff9a3d", key: "7" },
+  { id: "cardboard", label: "Brown wall", hex: "#c0925e", key: "6" },
+  { id: "home", label: "Black home base", hex: "#88909d", key: "7" },
 ];
 
 export const CLASS_HEX: Record<string, string> = Object.fromEntries(

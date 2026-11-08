@@ -14,21 +14,22 @@ while accepting scooper actions from the existing `/bench` panel.
 ```text
 Browser → Mission Control on Mac → Wi-Fi → rover ESP32 ↔ UNO
                     ↕ one BLE GATT session
-                 ESP32-S3 → touchscreen + GPIO41/42 scooper
+                 ESP32-S3 → touchscreen + GPIO39/40 scooper
 ```
 
 The generated `.ino` embeds all project headers. No other project tabs need to be
 copied into Arduino IDE. The original vendor firmware, standalone display and
-standalone Wi-Fi scooper sources remain preserved.
+standalone Wi-Fi scooper logic remain preserved; the shared servo pin configuration
+now uses GPIO39/40.
 
 ## Hardware and upload
 
-No wiring changes:
+Current wiring (servo signals moved from GPIO41/42 for isolation testing):
 
 - LCD: SPI12/13/11, CS10, DC8, reset9, backlight 3V3.
 - `screen.begin(8000000)`, rotation 3, 480×320.
 - Touch: SDA4/SCL5, reset6/INT7, 100 kHz, 5 ms timeout, 20 ms polling.
-- Servo signals: GPIO41 left, GPIO42 right. Existing mirrored right output,
+- Servo signals: GPIO39 left, GPIO40 right. Existing mirrored right output,
   limits, trims and poses come from `esp32-scooper/ScooperConfig.h`.
 - Use a suitable separate **5 V servo supply with common GND**; do not power the
   servos from 3V3. USB supplies the S3 logic/display.

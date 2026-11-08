@@ -27,12 +27,13 @@ constexpr uint8_t kDownDeg = 90;
 constexpr uint8_t kOutDeg = kDownDeg - 30;
 constexpr uint8_t kInDeg = kDownDeg + 80;
 
-// SG90 wiring on the header with GPIO37: signal on GPIO41 (left) and GPIO42 (right).
+// SG90 signals: GPIO39 (left) and GPIO40 (right); moved from 41/42 for isolation testing.
 // Not 35/36/37 on that header: the board's octal PSRAM uses them. Also avoid 0/45/46
 // (boot strapping), 19/20 (USB), 43/44 (debug UART) and 4-13 (display + touch).
+// GPIO47/48 use 1.8V logic on the N32R16V module; do not use for these servo signals.
 constexpr Joint kJoints[kJointCount] = {
-    {"left", 41, kOutDeg - 10, kInDeg + 5, kDownDeg, 0, false},
-    {"right", 42, kOutDeg - 10, kInDeg + 5, kDownDeg, 0, true},
+    {"left", 39, kOutDeg - 10, kInDeg + 5, kDownDeg, 0, false},
+    {"right", 40, kOutDeg - 10, kInDeg + 5, kDownDeg, 0, true},
 };
 
 // SG90: 50 Hz, about 500 us = 0° to 2400 us = 180° (the rover's pan servo uses the same).

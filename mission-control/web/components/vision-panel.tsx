@@ -1,7 +1,7 @@
 import { Camera, Eye, ScanSearch, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { VisionUi } from "@/hooks/use-vision-ui";
-import { CLASS_HEX, VISION_TARGETS, type VisionSummary } from "@/lib/vision";
+import { CLASS_HEX, SAMPLE_CLASSES, VISION_TARGETS, type VisionSummary } from "@/lib/vision";
 
 /** Live vision status (detection, planner dry run) and overlay toggles. */
 export function VisionPanel({
@@ -46,7 +46,7 @@ export function VisionPanel({
       <div className="panel-heading">
         <div className="heading-icon"><ScanSearch size={16} /><h2>Vision</h2></div>
         <span className="micro muted">
-          {vision.mode === "classifier" ? "CLASSIFIER" : "HSV"} · {vision.fps?.toFixed(1) ?? "0"} FPS
+          {vision.mode === "palette" ? "ARENA COLORS" : vision.mode === "classifier" ? "CLASSIFIER" : "HSV"} · {vision.fps?.toFixed(1) ?? "0"} FPS
           {vision.processing_ms != null ? ` · ${vision.processing_ms} ms` : ""}
         </span>
       </div>
@@ -79,11 +79,18 @@ export function VisionPanel({
             </small>
           )}
         </div>
-        <div className="vision-plan">
+        {vision.materials && <div className="vision-materials" aria-label="Visible materials">
+          {SAMPLE_CLASSES.filter((c) => c.id !== "floor").map((c) => <span key={c.id}
+            className={`vision-chip ${vision.materials?.[c.id]?.detected ? "selected" : ""}`}
+            style={{ "--chip": c.hex } as React.CSSProperties}>
+            {c.label} <small>{vision.materials?.[c.id]?.detected ? `${vision.materials[c.id].count} visible` : "not in view"}</small>
+          </span>)}
+        </div>}
+        <details className="vision-plan"><summary>Planner preview · no rover movement</summary>
           <span className="micro">PLANNER · DRY RUN (NEVER MOVES THE ROVER)</span>
           <strong>{vision.nav_state ?? "—"} → {vision.nav_label ?? "…"}</strong>
           {vision.nav_reason && <small>{vision.nav_reason}</small>}
-        </div>
+        </details>
         <div className="vision-toggles" role="group" aria-label="Overlay options">
           <Button variant={ui.show ? "secondary" : "outline"} size="sm" aria-pressed={ui.show} onClick={() => ui.setShow(!ui.show)}>
             <Eye size={13} /> Overlay

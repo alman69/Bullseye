@@ -80,9 +80,10 @@ DEFAULTS: dict = {
         "stop_line_y": None,
         "size_tolerance": 2.0,
     },
-    "rover_mask": {"boxes": []},
+    "rover_mask": {"boxes": [], "polygons": []},
+    "palette": {"profiles": {}},
     "classifier": {
-        "mode": "auto",
+        "mode": "palette",
         "model_path": "color_model.json",
         "samples_path": "captures/samples.npz",
         "max_distance": 4.0,

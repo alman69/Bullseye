@@ -78,24 +78,24 @@ The two-second device watchdog remains enabled.
 
 The newest sketch also accepts the **read-only** `pwm` command. Wait two seconds
 after a position command, then send `pwm`: expect 50 Hz on each active output.
-With the original wiring/configuration, right logical 80° is mirrored to 100°
-and approximately duty 1274 / 16384 on GPIO42; home 90° is duty 1188. These are
+With the current GPIO39/40 configuration, right logical 80° is mirrored to 100°
+and approximately duty 1274 / 16384 on GPIO40; home 90° is duty 1188. These are
 peripheral register readbacks, not an electrical measurement at the connector.
 
 ## If only one servo moves
 
 With **both USB and servo power disconnected**, swap only the signal leads
-between GPIO41 and GPIO42, leaving supply/GND wiring intact. Restore power with
+between GPIO39 and GPIO40, leaving supply/GND wiring intact. Restore power with
 the mechanism clear, keep Mission Control stopped, and test `set 1 80 30` /
 `set 1 90 30`, waiting between lines. This now tests the previously stationary
 servo on the signal path that moved the other servo.
 
-- If that servo now moves, investigate the original GPIO42 signal path or its
+- If that servo now moves, investigate the original GPIO40 signal path or its
   connector/output; this does not yet distinguish software output from wiring.
 - If it still does not move on the known working path, inspect that servo's
   supply, connector, load and servo itself next.
-- After the crossover test, disconnect both supplies and **restore GPIO41 to
-  left / GPIO42 to right before any normal Squeeze sequence**. The right output
+- After the crossover test, disconnect both supplies and **restore GPIO39 to
+  left / GPIO40 to right before any normal Squeeze sequence**. The right output
   is intentionally mirrored, so swapped signals are only a diagnostic setup.
 
 Operator reports on November 8: the left servo moved and returned on GPIO41.
@@ -109,6 +109,20 @@ is unsure what adjustment restored operation, so do not assign a confirmed
 cause to the earlier stationary output. Both local command paths have now
 passed that reported small-range test. Remote BLE motion and the full
 squeeze/release range still need operator verification.
+
+Subsequent operator report: both servos also passed the progressive individual
+range tests, including the configured endpoints. `boot=` remained unchanged
+through the individual tests. This does not establish reset behavior during
+the failing BLE Squeeze attempt or simultaneous loaded operation.
+
+The operator confirmed servo power comes from the S3/USB 5V pin, split on a
+breadboard, sharing the same battery source as the S3/display. A power-path or
+attached-servo effect is a hypothesis, not a confirmed diagnosis. The operator
+then disconnected both servos completely and reported that **BLE stayed
+connected through Squeeze with only the S3/display powered**. The software
+sequence can complete without motor load; attached-servo/power/wiring effects
+are now the leading investigation path. Supply voltage/current under load
+have not been measured, and the exact electrical cause is not established.
 
 A cleared watchdog warning never resumes a previous sequence. Only a fresh
 operator action can start another move. No physical pass is claimed until the
@@ -158,3 +172,28 @@ holds torque and must not be treated as removal of power from a stalled servo.
 
 These commands exercise one servo at a time. They do not establish that the
 supply can run two loaded servos together while BLE and the display are active.
+
+## Isolate motor load from BLE/software behavior
+
+1. Stop Mission Control and remove all USB/servo power before changing wiring.
+2. Disconnect both servos completely, including signal and supply leads. Leave
+   the display/touch wiring intact. Removing only servo V+ while leaving signal
+   attached is not this test.
+3. Restore the S3's normal USB power with the display only. Close Serial Monitor,
+   start `mission-control/run-rover-demo.sh`, then Claim controls → Scooper Connect.
+4. Press Squeeze once with no servos attached and watch BLE for ten seconds.
+
+The same firmware/PWM sequence runs without drawing servo motor current. If
+BLE remains connected, investigate the attached-servo/power/wiring path next.
+If it still drops, the failure is reproducible without motor load and requires
+BLE/firmware investigation. Neither result by itself measures supply voltage
+or proves a particular component failed. Restore connections only with power off.
+
+For the next supply-isolation test, identify the exact battery/USB source and
+available regulated servo supply, including voltage/current ratings, before
+choosing wiring. Power the S3/display by its normal USB method and give the
+servos their own suitable power path; their signal reference still requires
+common ground. Do not join different positive supplies or inject another supply
+into a USB-powered S3's 5V header. The [official DevKitC-1 v1.1 guide](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32-s3-devkitc-1/user_guide_v1.1.html)
+lists board supply methods as mutually exclusive; it does not establish the
+available servo current on this particular board, battery, or breadboard path.

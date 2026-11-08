@@ -291,7 +291,7 @@ export default function App() {
     clearError,
   } = useMission();
   const [busy, setBusy] = useState(false);
-  const visionUi = useVisionUi(act);
+  const visionUi = useVisionUi(act, connected && isPilot);
   const [guideOpen, setGuideOpen] = useState(false);
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [mobileView, setMobileView] = useState<MobileView>("mission");
