@@ -1,7 +1,7 @@
 import { Camera, Eye, ScanSearch, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { VisionUi } from "@/hooks/use-vision-ui";
-import { CLASS_HEX, VISION_TARGETS, type VisionSummary } from "@/lib/vision";
+import { CLASS_HEX, NAV_TARGETS, type VisionSummary } from "@/lib/vision";
 
 /** Live vision status (detection, planner dry run) and overlay toggles. */
 export function VisionPanel({
@@ -53,7 +53,7 @@ export function VisionPanel({
       <div className="vision-body">
         {targetControl && (
           <div className="vision-targets" role="group" aria-label="Vision target">
-            {VISION_TARGETS.map((color) => (
+            {NAV_TARGETS.map((color) => (
               <button
                 key={color}
                 type="button"

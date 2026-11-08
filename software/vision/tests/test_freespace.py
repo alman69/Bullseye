@@ -86,6 +86,14 @@ class FreeSpaceTests(unittest.TestCase):
         target_mask = detector.mask(img, "red")
         self.assertFalse(analyze_floor(img, self.s, exclude_mask=target_mask).center_blocked)
 
+    def test_yellow_is_always_an_obstacle(self):
+        img = arena(200)
+        cv2.rectangle(img, (340, 470), (460, 560), YELLOW, -1)
+        everything_floor = np.full((H, W), 255, np.uint8)        # even if the floor test says "floor"
+        self.assertFalse(analyze_floor(img, self.s, floor_mask=everything_floor).center_blocked)
+        yellow = ColorDetector.from_config(clean_config()).mask(img, "yellow")
+        self.assertTrue(analyze_floor(img, self.s, floor_mask=everything_floor, obstacle_mask=yellow).center_blocked)
+
     def test_no_floor_visible(self):
         img = np.full((H, W, 3), CARDBOARD, np.uint8)
         free = analyze_floor(img, self.s)

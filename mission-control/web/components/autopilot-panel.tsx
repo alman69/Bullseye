@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import type { MissionState } from "@/lib/protocol";
 import { CLASS_HEX } from "@/lib/vision";
 
-const ORES = ["red", "green", "blue", "yellow"] as const;
+const ORES = ["red", "green", "blue"] as const; // yellow is the obstacle color, never a target
 
 /** Demo autopilot on /bench: drive to a mineral, then turn 180 degrees and drive to the black flag. */
 export function AutopilotPanel({

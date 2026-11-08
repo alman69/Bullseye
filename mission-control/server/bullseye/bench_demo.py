@@ -414,8 +414,10 @@ class BenchControl:
                     avoid = payload.get("avoid") is True
                     if kind == "auto_goto":
                         color = payload.get("color")
-                        if color not in ("red", "green", "blue", "yellow", "black"):
-                            raise CommandError("Choose red, green, blue, yellow or black.")
+                        if color == "yellow":
+                            raise CommandError("Yellow is the obstacle color, not a mineral.")
+                        if color not in ("red", "green", "blue", "black"):
+                            raise CommandError("Choose red, green, blue or black.")
                         label = f"Autopilot: go to {color}" + (" (avoiding obstacles)" if avoid else "")
                         job = lambda pilot: pilot.go_to(color, avoid=avoid)
                     else:

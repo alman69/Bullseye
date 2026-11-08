@@ -121,8 +121,9 @@ describe("VisionPanel", () => {
     expect(screen.getByText("RED DETECTED")).toBeTruthy();
     expect(screen.getByText(/APPROACH → TURN LEFT 200 ms/)).toBeTruthy();
     expect(screen.getByText(/~42 cm/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "yellow" }));
-    expect(act).toHaveBeenCalledWith("vision_target", { color: "yellow" });
+    expect(screen.queryByRole("button", { name: "yellow" })).toBeNull(); // yellow = obstacles, not a target
+    fireEvent.click(screen.getByRole("button", { name: "blue" }));
+    expect(act).toHaveBeenCalledWith("vision_target", { color: "blue" });
   });
 
   it("explains when vision is off or unavailable", () => {

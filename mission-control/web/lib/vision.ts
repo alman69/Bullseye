@@ -84,6 +84,8 @@ export type VisionOverlayOptions = {
 };
 
 export const VISION_TARGETS = ["red", "green", "blue", "yellow", "black"] as const;
+/** What the rover can drive to: the minerals and the black home flag. Yellow is the obstacle color. */
+export const NAV_TARGETS = ["red", "green", "blue", "black"] as const;
 
 /** Special "sampling class": dragging adds a rover-mask box instead of color samples. */
 export const MASK_TOOL = "__rover_mask__";
