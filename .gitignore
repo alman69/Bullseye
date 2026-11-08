@@ -11,8 +11,18 @@ __MACOSX/
 *.o
 build/
 
-# Python / laptop vision
+# Python virtual environments and caches (shared)
+.venv/
 __pycache__/
 *.pyc
-.venv/
+.pytest_cache/
+*.egg-info/
+
+# Laptop vision: debug snapshots may show people; never commit them
 software/vision/captures/
+
+# Mission Control dependencies, settings, and generated output
+node_modules/
+dist/
+.env
+*.tsbuildinfo

@@ -1,0 +1,42 @@
+from dataclasses import dataclass
+import os
+from pathlib import Path
+from urllib.parse import urlparse
+
+
+@dataclass(frozen=True)
+class Settings:
+    mode: str = "simulation"
+    camera_url: str = ""
+    search_seconds: float = 3.0
+    approach_seconds: float = 3.0
+    lease_seconds: float = 3.0
+    drive_seconds: float = 0.3
+    collection_seconds: float = 0.8
+    fail_collection_once: bool = False
+    bench_enabled: bool = False
+    rover_host: str = "192.168.4.1"
+    rover_port: int = 100
+    web_dist: Path = Path(__file__).resolve().parents[2] / "web" / "dist"
+
+    def __post_init__(self):
+        if self.mode not in {"simulation", "hardware"}:
+            raise ValueError("BULLSEYE_MODE must be simulation or hardware")
+        if self.camera_url and urlparse(self.camera_url).scheme not in {"http", "https"}:
+            raise ValueError("CAMERA_STREAM_URL must be an HTTP(S) stream URL")
+        if not 1 <= self.rover_port <= 65535:
+            raise ValueError("ROVER_PORT must be 1–65535")
+        if self.bench_enabled and self.mode != "hardware":
+            raise ValueError("The real-rover bench demo requires BULLSEYE_MODE=hardware")
+
+    @classmethod
+    def from_env(cls):
+        bench = os.getenv("BULLSEYE_BENCH_ENABLED", "0") == "1"
+        return cls(
+            mode=os.getenv("BULLSEYE_MODE", "simulation"),
+            camera_url=os.getenv("CAMERA_STREAM_URL", "http://192.168.4.1:81/stream" if bench else ""),
+            fail_collection_once=os.getenv("BULLSEYE_SIM_FAIL_COLLECTION_ONCE", "0") == "1",
+            bench_enabled=bench,
+            rover_host=os.getenv("ROVER_HOST", "192.168.4.1"),
+            rover_port=int(os.getenv("ROVER_PORT", "100")),
+        )
