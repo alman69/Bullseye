@@ -86,6 +86,7 @@ DEFAULTS: dict = {
         "model_path": "color_model.json",
         "samples_path": "captures/samples.npz",
         "max_distance": 4.0,
+        "min_chroma": 12.0,
         "regularization": 4.0,
         "white_balance": True,
         "wb_alpha": 0.2,

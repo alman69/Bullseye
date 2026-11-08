@@ -6,9 +6,9 @@ import unittest
 import cv2
 import numpy as np
 
-from bullseye_vision.config import load_config
 from bullseye_vision.detector import ColorDetector
 from bullseye_vision.freespace import FloorSettings, analyze_floor
+from support import clean_config
 
 H, W = 600, 800
 FLOOR = (235, 235, 235)        # matte white floor (BGR)
@@ -82,7 +82,7 @@ class FreeSpaceTests(unittest.TestCase):
         img = arena(200)
         cv2.rectangle(img, (350, 450), (450, 580), RED, -1)
         self.assertTrue(analyze_floor(img, self.s).center_blocked)
-        detector = ColorDetector.from_config(load_config())
+        detector = ColorDetector.from_config(clean_config())
         target_mask = detector.mask(img, "red")
         self.assertFalse(analyze_floor(img, self.s, exclude_mask=target_mask).center_blocked)
 

@@ -381,7 +381,7 @@ def run_gui(source, detector: ColorDetector, cfg: dict, args) -> None:
         elif sampling["on"] and key == ord("m"):
             try:
                 model = ColorModel.fit(samples, cc.get("max_distance", 4.0), cc.get("regularization", 4.0),
-                                       cc.get("floor_class", "floor"))
+                                       cc.get("floor_class", "floor"), min_chroma=cc.get("min_chroma", 12.0))
             except ValueError as error:
                 print(f"cannot fit: {error}")
             else:

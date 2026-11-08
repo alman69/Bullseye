@@ -1,7 +1,6 @@
 """Vision service inside Mission Control: processing, calibration commands and API."""
 import asyncio
 import json
-import shutil
 import time
 
 import cv2
@@ -20,7 +19,11 @@ from bullseye.vision import PACKAGE_DIR, VisionService
 @pytest.fixture
 def vision_dir(tmp_path):
     """Isolated calibration folder: a copy of the repo's vision config, no color model."""
-    shutil.copy(PACKAGE_DIR / "config.json", tmp_path / "config.json")
+    cfg = json.loads((PACKAGE_DIR / "config.json").read_text())
+    cfg["camera"]["controls"] = {}                     # start from a blank calibration, not the arena's
+    cfg["rover_mask"] = {"boxes": []}
+    cfg["classifier"]["mode"] = "auto"
+    (tmp_path / "config.json").write_text(json.dumps(cfg))
     return tmp_path
 
 

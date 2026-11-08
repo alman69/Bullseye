@@ -28,6 +28,7 @@ import numpy as np
 
 UNKNOWN = 255
 SAMPLE_CLASSES = ("red", "green", "blue", "yellow", "floor", "cardboard", "obstacle")
+BACKGROUND_CLASSES = ("floor", "cardboard", "obstacle")
 BITS = 5                                   # lookup-table resolution per BGR channel
 SHIFT = 8 - BITS
 
@@ -81,7 +82,7 @@ class WhiteBalance:
 
 
 class ColorModel:
-    def __init__(self, classes, means, covs, max_distance=4.0, reference_floor=None, counts=None):
+    def __init__(self, classes, means, covs, max_distance=4.0, reference_floor=None, counts=None, gates=None):
         self.classes = list(classes)
         self.means = np.asarray(means, np.float32).reshape(-1, 3)
         self.covs = np.asarray(covs, np.float32).reshape(-1, 3, 3)
@@ -89,12 +90,18 @@ class ColorModel:
         self.max_distance = float(max_distance)
         self.reference_floor = None if reference_floor is None else [float(v) for v in reference_floor]
         self.counts = dict(counts or {})
+        # Color-direction gates: {class: [unit_a, unit_b, threshold]}. A pixel only counts as that
+        # mineral if its color points far enough in the mineral's own direction (Lab a/b plane).
+        # Tinted floor and cardboard under the floodlight fail it and fall back to the nearest
+        # background class. Learned from the samples by fit().
+        self.gates = {k: [float(x) for x in v] for k, v in (gates or {}).items()}
         self.lut = self._build_lut()
 
     # -- fitting / persistence ---------------------------------------------
     @classmethod
     def fit(cls, samples: dict, max_distance: float = 4.0, regularization: float = 4.0,
-            floor_class: str = "floor", min_pixels: int = 30) -> "ColorModel":
+            floor_class: str = "floor", min_pixels: int = 30, min_chroma: float = 12.0,
+            max_cut: float = 0.20) -> "ColorModel":
         classes, means, covs, counts = [], [], [], {}
         for name in SAMPLE_CLASSES + tuple(k for k in samples if k not in SAMPLE_CLASSES):
             px = samples.get(name)
@@ -109,17 +116,45 @@ class ColorModel:
             raise ValueError("sample at least two classes (for example a mineral and the floor)")
         floor = samples.get(floor_class)
         reference = np.median(floor.astype(np.float32), axis=0) if floor is not None and len(floor) >= min_pixels else None
-        return cls(classes, means, covs, max_distance, reference, counts)
+        return cls(classes, means, covs, max_distance, reference, counts,
+                   cls._fit_gates(samples, classes, min_chroma, max_cut))
+
+    @staticmethod
+    def _fit_gates(samples: dict, classes: list, min_chroma: float, max_cut: float) -> dict:
+        """Per mineral: threshold = max(brightest background tint in that color direction + 2, min_chroma),
+        but never cutting more than max_cut of the mineral's own samples."""
+        def ab(px):
+            return bgr_to_lab(px)[:, 1:].astype(np.float64) - 128.0
+
+        def along(v, u):            # elementwise dot product (avoids spurious BLAS warnings on macOS)
+            return v[:, 0] * u[0] + v[:, 1] * u[1]
+        background = [ab(samples[b]) for b in BACKGROUND_CLASSES if b in classes]
+        bg = np.concatenate(background) if background else np.zeros((0, 2))
+        gates = {}
+        for name in classes:
+            if name in BACKGROUND_CLASSES:
+                continue
+            own = ab(samples[name])
+            direction = own.mean(axis=0)
+            norm = float(np.linalg.norm(direction))
+            if norm < 1e-6:
+                continue                                   # a gray "mineral": no direction to gate on
+            unit = direction / norm
+            threshold = max(float(np.percentile(along(bg, unit), 99.5)) + 2.0 if len(bg) else min_chroma, min_chroma)
+            threshold = min(threshold, float(np.percentile(along(own, unit), max_cut * 100)))
+            gates[name] = [float(unit[0]), float(unit[1]), threshold]
+        return gates
 
     def to_dict(self) -> dict:
         return {"classes": self.classes, "means": self.means.round(3).tolist(),
                 "covs": self.covs.round(4).tolist(), "max_distance": self.max_distance,
-                "reference_floor_bgr": self.reference_floor, "sample_counts": self.counts}
+                "reference_floor_bgr": self.reference_floor, "sample_counts": self.counts,
+                "gates": {k: [round(x, 5) for x in v] for k, v in self.gates.items()}}
 
     @classmethod
     def from_dict(cls, d: dict) -> "ColorModel":
         return cls(d["classes"], d["means"], d["covs"], d.get("max_distance", 4.0),
-                   d.get("reference_floor_bgr"), d.get("sample_counts"))
+                   d.get("reference_floor_bgr"), d.get("sample_counts"), d.get("gates"))
 
     def save(self, path) -> Path:
         path = Path(path)
@@ -131,7 +166,7 @@ class ColorModel:
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
 
     # -- classification -----------------------------------------------------
-    def classify_lab(self, lab: np.ndarray) -> np.ndarray:
+    def classify_lab(self, lab: np.ndarray, gate: bool = True) -> np.ndarray:
         """(N,3) Lab -> (N,) class index or UNKNOWN."""
         best = np.full(len(lab), np.inf, np.float32)
         labels = np.full(len(lab), UNKNOWN, np.uint8)
@@ -142,7 +177,36 @@ class ColorModel:
             best[better] = d2[better]
             labels[better] = i
         labels[best > self.max_distance ** 2] = UNKNOWN
+        if gate:
+            self._apply_gates(lab, labels)
         return labels
+
+    def _apply_gates(self, lab: np.ndarray, labels: np.ndarray) -> None:
+        """In place: mineral pixels whose color doesn't point far enough in that mineral's direction
+        go to the nearest background class (or UNKNOWN if none is close enough)."""
+        if not self.gates:
+            return
+        background = [i for i, c in enumerate(self.classes) if c in BACKGROUND_CLASSES]
+        for name, (ua, ub, threshold) in self.gates.items():
+            i = self.index(name)
+            if i is None:
+                continue
+            idx = np.flatnonzero(labels == i)
+            if not idx.size:
+                continue
+            ab = lab[idx, 1:].astype(np.float64) - 128.0
+            failed = idx[ab[:, 0] * ua + ab[:, 1] * ub < threshold]
+            if not failed.size:
+                continue
+            if background:
+                sub_lab = lab[failed].astype(np.float32)
+                d2 = np.stack([np.einsum("nj,jk,nk->n", sub_lab - self.means[j], self.inv_covs[j],
+                                         sub_lab - self.means[j]) for j in background], axis=1)
+                new = np.array(background, np.uint8)[np.argmin(d2, axis=1)]
+                new[d2.min(axis=1) > self.max_distance ** 2] = UNKNOWN
+                labels[failed] = new
+            else:
+                labels[failed] = UNKNOWN
 
     def classify_bgr(self, pixels: np.ndarray) -> np.ndarray:
         return self.classify_lab(bgr_to_lab(pixels))
@@ -151,13 +215,24 @@ class ColorModel:
         centers = (np.arange(2 ** BITS, dtype=np.uint16) << SHIFT) + (1 << (SHIFT - 1))
         b, g, r = np.meshgrid(centers, centers, centers, indexing="ij")
         grid = np.stack([b.ravel(), g.ravel(), r.ravel()], axis=1).astype(np.uint8)
-        return self.classify_bgr(grid)                    # index = b<<10 | g<<5 | r (5 bits each)
+        return self.classify_lab(bgr_to_lab(grid), gate=False)   # index = b<<10 | g<<5 | r (5 bits each)
 
     def labels(self, frame_bgr: np.ndarray) -> np.ndarray:
         """Per-pixel class index image (uint8, UNKNOWN = 255) via the lookup table."""
         q = (frame_bgr >> SHIFT).astype(np.int32)
         idx = (q[..., 0] << (2 * BITS)) | (q[..., 1] << BITS) | q[..., 2]
-        return self.lut[idx]
+        labels = self.lut[idx]
+        if self.gates:                      # exact per-pixel gate, only for pixels labeled as a mineral
+            gated = [self.index(n) for n in self.gates if self.index(n) is not None]
+            candidates = np.isin(labels, gated)
+            if candidates.any():
+                flat = labels.reshape(-1)
+                where = np.flatnonzero(candidates.reshape(-1))
+                sub_labels = flat[where].copy()
+                self._apply_gates(bgr_to_lab(frame_bgr.reshape(-1, 3)[where]), sub_labels)
+                flat[where] = sub_labels
+                labels = flat.reshape(labels.shape)
+        return labels
 
     def index(self, name: str):
         return self.classes.index(name) if name in self.classes else None

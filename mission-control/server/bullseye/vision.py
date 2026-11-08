@@ -364,7 +364,8 @@ class VisionService:
         cc = self.cfg["classifier"]
         try:
             model = self.v.colorclass.ColorModel.fit(self.samples, cc.get("max_distance", 4.0),
-                                                     cc.get("regularization", 4.0), cc.get("floor_class", "floor"))
+                                                     cc.get("regularization", 4.0), cc.get("floor_class", "floor"),
+                                                     min_chroma=cc.get("min_chroma", 12.0))
         except ValueError as error:
             raise CommandError(str(error)) from None
         model.save(self.model_path)
