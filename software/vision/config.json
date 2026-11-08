@@ -29,6 +29,9 @@
     "wb_gain_max": 1.6,
     "floor_class": "floor"
   },
+  "rover_mask": {
+    "boxes": []
+  },
   "floor": {
     "roi_top": 0.5,
     "strips": 5,
@@ -63,9 +66,9 @@
     "emergency_distance_cm": 10,
     "distance_check_every": 3,
     "lost_decisions": 3,
-    "search_turn_ms": 300,
+    "search_turn_ms": 1000,
     "search_turns": 8,
-    "avoid_turn_ms": 300,
+    "avoid_turn_ms": 1000,
     "avoid_forward_steps": 2,
     "avoid_max_retries": 4,
     "backoff_ms": 300,
@@ -76,8 +79,16 @@
     "approach_zone_y": 0.08,
     "camera_hfov_deg": 0,
     "steps": {
-      "forward": {},
-      "turn": {}
+      "forward": {
+        "200": 2.7,
+        "500": 7.5,
+        "1000": 15.0
+      },
+      "turn": {
+        "200": 8.3,
+        "500": 20.9,
+        "1000": 49.0
+      }
     }
   },
   "colors": {
