@@ -1,0 +1,6 @@
+# Optional display sender, macOS/Python 3.13. Base server lock stays unchanged.
+bleak==3.1.0
+pyobjc-core==13.0; sys_platform == 'darwin'
+pyobjc-framework-Cocoa==13.0; sys_platform == 'darwin'
+pyobjc-framework-CoreBluetooth==13.0; sys_platform == 'darwin'
+pyobjc-framework-libdispatch==13.0; sys_platform == 'darwin'

@@ -8,6 +8,7 @@ Camera-guided sample missions with a laptop-hosted Mission Control dashboard.
 - [Firmware setup and known hardware behavior](docs/FIRMWARE_SETUP.md)
 - [Direct ELEGOO connection: no-app, no-motion bench test](docs/ELEGOO_CONNECTION.md)
 - [Local real-rover control demo](docs/ELEGOO_CONNECTION.md#local-browser-control-demo)
+- [Separate ESP32-S3 BLE distance display and Mac sender](docs/BLE_DISPLAY.md)
 - [Vendor source references and attribution](docs/SOURCE_REFERENCES.md)
 
 After setup, run `./mission-control/run.sh` and open http://localhost:8000.
