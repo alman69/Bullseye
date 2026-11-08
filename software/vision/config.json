@@ -56,6 +56,8 @@
     "backoff_ms": 300,
     "explore_steps": 3,
     "explore_timeout_s": 120,
+    "explore_forward_ms": 1000,
+    "wall_distance_cm": 25,
     "decision_period_s": 0.5,
     "arrival_mode": "camera",
     "approach_zone_y": 0.08,
@@ -71,9 +73,7 @@
         "500": 20.9,
         "1000": 49.0
       }
-    },
-    "explore_forward_ms": 1000,
-    "wall_distance_cm": 25
+    }
   },
   "ground": {
     "points": [],
@@ -113,6 +113,24 @@
         0.8331,
         0.8702,
         1.0
+      ],
+      [
+        0.3291,
+        0.8734,
+        0.3777,
+        0.9962
+      ],
+      [
+        0.6618,
+        0.8664,
+        0.7154,
+        0.9095
+      ],
+      [
+        0.6871,
+        0.8442,
+        0.7128,
+        0.8764
       ]
     ]
   },
@@ -121,6 +139,7 @@
     "model_path": "color_model.json",
     "samples_path": "captures/samples.npz",
     "max_distance": 4.0,
+    "min_chroma": 12.0,
     "regularization": 4.0,
     "white_balance": true,
     "wb_alpha": 0.2,
