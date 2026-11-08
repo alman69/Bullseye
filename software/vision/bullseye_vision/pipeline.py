@@ -51,6 +51,8 @@ class NavRunner:
             if color != det.target_color and color in detector.colors:
                 m = detector.mask(frame.image, color, prepared=prepared)
                 obstacle = m if obstacle is None else cv2.bitwise_or(obstacle, m)
+        if obstacle is not None and rover is not None:
+            obstacle = self._without_rover_parts(obstacle, rover)
         self.free = analyze_floor(frame.image, self.floor, exclude, floor_mask=floor_mask, obstacle_mask=obstacle)
         everything = np.full(frame.image.shape[:2], 255, np.uint8)
         self.free_obstacles = analyze_floor(frame.image, self.floor, None, floor_mask=everything, obstacle_mask=obstacle)
@@ -59,6 +61,21 @@ class NavRunner:
             self.action = self.planner.decide(det, self.free, None, camera_ok=fresh, now=now)
             self.next_at = now + self.settings.decision_period_s
         return self.action
+
+    @staticmethod
+    def _without_rover_parts(obstacle: np.ndarray, rover: np.ndarray, max_ratio: float = 0.02) -> np.ndarray:
+        """Drop small obstacle-colored blobs touching the rover mask: the gripper's blue tape poking
+        out past the mask boxes is part of the rover, not an obstacle. Real obstacles are bigger."""
+        near = cv2.dilate(rover, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31)))
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(obstacle, connectivity=8)
+        limit = max_ratio * obstacle.shape[0] * obstacle.shape[1]
+        out = obstacle.copy()
+        for i in range(1, count):
+            if stats[i, cv2.CC_STAT_AREA] < limit:
+                blob = labels == i
+                if near[blob].any():
+                    out[blob] = 0
+        return out
 
     def to_dict(self) -> dict:
         return {"dry_run": True, "state": self.planner.state,

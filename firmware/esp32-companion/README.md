@@ -1,5 +1,10 @@
 # Bullseye Companion — display and scooper on one BLE connection
 
+Current squeeze sequence: move both paddles directly to **60 logical degrees** and hold.
+**Let go** moves both to **140 degrees** and holds. **Straight down** returns to **90 degrees**. There is no automatic 170-degree step.
+Upload the updated firmware to replace the older sequence; right-servo mirroring is preserved.
+
+
 Upload **one file** to the existing ESP32-S3 touchscreen board:
 
 ```text
@@ -35,7 +40,7 @@ Current wiring (servo signals moved from GPIO41/42 for isolation testing):
   servos from 3V3. USB supplies the S3 logic/display.
 
 **The servos are commanded to 90° at boot.** Clear the mechanism before upload
-or reset. Squeeze remains 90° → 60° → 170°. Angles are commanded positions;
+or reset. Squeeze holds at 60°; Let go holds at 140°. Angles are commanded positions;
 horn alignment, load, mechanical range and physical stopping need operator checks.
 
 | Arduino setting | Value |

@@ -1,5 +1,6 @@
 # From timed approach to reliable exploration
 
+
 The integrated `/bench` mission approaches red or green ore, stops to signal the sample with green
 rover LEDs and a happy response on the connected BLE display, then automatically searches for the black home flag and returns.
 Reaching the ore is the demo sample event; no grasping or manual pickup is required. This is a
@@ -22,7 +23,7 @@ global position or which floor areas it has visited. A successful simulated miss
 - At stopped ore arrival, `sample_reached` signals the demo sample: rover LEDs turn green and the
   display celebrates. The mission then automatically searches for home and returns with green LEDs.
   At `home_arrived`, it stops and resets red. Ore searching starts with red LEDs.
-- Servo squeezing is retired. The sample event records arrival, not physical possession. No manual
+- Manual servo controls are available separately. The autonomous sample event records arrival, not physical possession. No manual
   pickup/deposit confirmation or arbitrary wait for a person is part of the mission.
 
 Color and size are still heuristics. A black shadow can resemble the home flag, the sonar can see a

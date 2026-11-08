@@ -330,3 +330,14 @@
   background: rgba(255, 225, 77, 0.12);
   border: 1px solid rgba(255, 225, 77, 0.55);
 }
+
+/* Keep mission actions aligned without squeezing their labels. */
+.autopilot-colors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.autopilot-colors .vision-chip { justify-content: center; min-height: 40px; }
+.autopilot-actions { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 10px; }
+.autopilot-actions > button { width: 100%; min-width: 0; min-height: 44px; height: auto; padding: 12px; white-space: normal; text-align: center; }
+.autopilot-actions svg { flex-shrink: 0; }
+.autopilot-start { font-weight: 700; }
+@media (max-width: 520px) {
+  .autopilot-actions { grid-template-columns: minmax(0, 1fr); }
+}

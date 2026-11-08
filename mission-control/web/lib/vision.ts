@@ -109,7 +109,7 @@ export const SAMPLE_CLASSES: { id: string; label: string; hex: string; key: stri
   { id: "green", label: "Green sample", hex: "#65c79b", key: "2" },
   { id: "blue", label: "Blue obstacle", hex: "#79aaf4", key: "3" },
   { id: "yellow", label: "Yellow material", hex: "#f2d15c", key: "4" },
-  { id: "floor", label: "Floor", hex: "#e9e6de", key: "5" },
+  { id: "floor", label: "Floor (white / tinted)", hex: "#e9e6de", key: "5" },
   { id: "cardboard", label: "Brown wall", hex: "#c0925e", key: "6" },
   { id: "home", label: "Black home base", hex: "#88909d", key: "7" },
 ];

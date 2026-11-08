@@ -172,7 +172,7 @@ async def test_one_connection_for_display_and_scooper_without_http_or_rover_requ
         assert calls == ["cache"]
         assert runtime.peripheral.commands[0][0] == 4  # Startup STOP only.
         assert await link.command("squeeze") is True
-        assert link.state == "sequence" and link.sequence == "squeeze" and link.step == "down"
+        assert link.state == "sequence" and link.sequence == "squeeze" and link.step == "squeezing"
         assert link.snapshot()["transport"] == "ble"
         assert await link.request_stop() is True
         assert link.state == "holding"

@@ -163,26 +163,40 @@ async def test_bench_squeeze_needs_pilot_and_connected_link(scooper_bench):
     with pytest.raises(CommandError, match="Claim"):
         await bench.command("viewer", "scooper_squeeze", {})
     await bench.command("pilot", "claim", {})
-    with pytest.raises(CommandError, match="retired"):
+    with pytest.raises(CommandError, match="Connect the scooper"):
         await bench.command("pilot", "scooper_squeeze", {})
     assert fake.commands == []
     assert bench.snapshot()["bench"]["scooper"]["status"] == "disconnected"
 
 
-@pytest.mark.parametrize("command", ["scooper_connect", "scooper_squeeze", "scooper_release", "scooper_home"])
-async def test_retired_servo_commands_never_reach_hardware(scooper_bench, command):
+async def test_bench_squeeze_works_without_enabling_rover_controls(scooper_bench):
     bench, fake = scooper_bench
     await bench.command("pilot", "claim", {})
-    await bench.scooper.connect()  # even a legacy connection must not bypass the command guard
-    with pytest.raises(CommandError, match="retired"):
-        await bench.command("pilot", command, {})
-    assert not fake.commands
+    await bench.command("pilot", "scooper_connect", {})
+    await settle_scooper(bench)
+    assert bench.snapshot()["bench"]["scooper"]["status"] == "ready"
+    assert not bench.armed
+    await bench.command("pilot", "scooper_squeeze", {})
+    await settle_scooper(bench)
+    assert fake.commands == ["squeeze"]
+    assert bench.snapshot()["bench"]["scooper"]["step"] == "out"
+    assert any("Squeeze started" in event["message"] for event in bench.events)
 
 
-async def test_bench_stop_still_stops_legacy_attached_scooper(scooper_bench):
+async def test_bench_rejects_overlapping_scooper_commands(scooper_bench):
+    bench, _ = scooper_bench
+    await bench.command("pilot", "claim", {})
+    await bench.command("pilot", "scooper_connect", {})
+    with pytest.raises(CommandError, match="still answering"):
+        await bench.command("pilot", "scooper_connect", {})
+    await settle_scooper(bench)
+
+
+async def test_bench_stop_also_freezes_the_scooper(scooper_bench):
     bench, fake = scooper_bench
     await arm(bench)
-    await bench.scooper.connect()
+    await bench.command("pilot", "scooper_connect", {})
+    await settle_scooper(bench)
     await bench.stop()
     await settle(bench)
     await wait_for(lambda: "stop" in fake.commands)

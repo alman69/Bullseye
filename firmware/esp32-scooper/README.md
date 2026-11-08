@@ -1,5 +1,10 @@
 # Bullseye scooper
 
+Current squeeze sequence: move both paddles directly to **60 logical degrees** and hold.
+**Let go** moves both to **140 degrees** and holds. **Straight down** returns to **90 degrees**. There is no automatic 170-degree step.
+Upload the updated firmware to replace the older sequence; right-servo mirroring is preserved.
+
+
 **Using the touchscreen S3 for both jobs?** Upload the
 [combined single-file companion sketch](../esp32-companion/README.md) instead.
 It preserves the full-screen animated face/BLE telemetry and adds these scooper

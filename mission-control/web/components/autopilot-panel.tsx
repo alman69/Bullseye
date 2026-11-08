@@ -24,12 +24,12 @@ export function AutopilotPanel({ state, canStep, act }: {
     </div>
     <div className="vision-body">
       <p className="vision-help">Choose a red or green sample. The rover searches, stops at it, turns its LED green and shows a happy animation, then automatically returns to the black home flag. Blue marks obstacles; brown marks walls. STOP cancels at any time.</p>
-      <div className="vision-targets" role="group" aria-label="Sample color">
+      <div className="vision-targets autopilot-colors" role="group" aria-label="Sample color">
         {ORES.map((c) => <button key={c} type="button" className={`vision-chip ${color === c ? "selected" : ""}`}
           style={{ "--chip": CLASS_HEX[c] } as React.CSSProperties} aria-pressed={color === c} disabled={!canStep} onClick={() => setColor(c)}>{c}</button>)}
       </div>
-      <div className="vision-actions">
-        <Button disabled={!ready} onClick={() => void act("auto_mission", { color, avoid: true, arm_token: token })}><Navigation size={14} /> Start sample mission</Button>
+      <div className="autopilot-actions">
+        <Button className="autopilot-start" disabled={!ready} onClick={() => void act("auto_mission", { color, avoid: true, arm_token: token })}><Navigation size={14} /> Start sample mission</Button>
         <Button variant="outline" disabled={!ready} onClick={() => void act("auto_return", { avoid: true, arm_token: token })}><Flag size={14} /> Return to base</Button>
       </div>
       <p className="vision-note">Return to base starts a separate home search when you need to recover the rover.</p>

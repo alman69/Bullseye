@@ -665,11 +665,12 @@ struct Joint {
   bool inverted;     // Mirror-mounted servo.
 };
 
-// The squeeze, as described: start straight down, swing out ~30°, then back in
-// to ~80° inward of straight down (a 110° swing that ends under the block).
+// Squeeze moves directly to 60 logical degrees and holds until explicit release.
 constexpr uint8_t kDownDeg = 90;
 constexpr uint8_t kOutDeg = kDownDeg - 30;
-constexpr uint8_t kInDeg = kDownDeg + 80;
+constexpr uint8_t kInDeg = kDownDeg + 80;  // Legacy manual angle limit, not a squeeze step.
+constexpr uint8_t kSqueezeDeg = 60;
+constexpr uint8_t kReleaseDeg = 140;
 
 // SG90 signals: GPIO39 (left) and GPIO40 (right); moved from 41/42 for isolation testing.
 // Not 35/36/37 on that header: the board's octal PSRAM uses them. Also avoid 0/45/46
@@ -699,13 +700,10 @@ struct Step {
 };
 
 constexpr Step kSqueezeSteps[] = {
-    {"down", {kDownDeg, kDownDeg}, 90, 200},
-    {"out", {kOutDeg, kOutDeg}, 90, 300},
-    {"in", {kInDeg, kInDeg}, 60, 0},  // Slower, so the block is lifted, not knocked.
+    {"squeeze", {kSqueezeDeg, kSqueezeDeg}, 60, 0},
 };
 constexpr Step kReleaseSteps[] = {
-    {"out", {kOutDeg, kOutDeg}, 90, 300},
-    {"down", {kDownDeg, kDownDeg}, 90, 0},
+    {"release", {kReleaseDeg, kReleaseDeg}, 90, 0},
 };
 
 }  // namespace scooper

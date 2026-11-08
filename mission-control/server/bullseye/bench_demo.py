@@ -452,8 +452,16 @@ class BenchControl:
                         self.drive_mode = "step"
                         self.log(f"One {self.direction} step requested: PWM {payload['speed']}/255, {payload['duration_ms']} ms.")
                         self.launch(lambda: self.bridge.pulse(payload["direction"], payload["speed"], payload["duration_ms"]), "Step finished. STOP acknowledged in software.")
-                elif kind == "scooper_connect" or kind in SCOOPER_ACTIONS:
-                    raise CommandError("Servo squeezing is retired on this rover. Samples are signalled by LEDs and the display.")
+                elif kind == "scooper_connect":
+                    self.log(f"Companion: connecting to {self.scooper.url}…")
+                    self._scooper_job(self._scooper_connect())
+                elif kind in SCOOPER_ACTIONS:
+                    # Independent of the rover controls: the pilot seat is enough.
+                    if not self.scooper.ready:
+                        raise CommandError("Connect the scooper first.")
+                    name = SCOOPER_ACTIONS[kind]
+                    self._scooper_job(self._scooper_command(name))
+                    self.log(f"Scooper: {SCOOPER_LABELS[name]} requested.")
                 elif kind in {"auto_goto", "auto_return", "auto_mission"}:
                     if not self.armed or not self.bridge.connected or self.stopped:
                         raise CommandError("Connect and enable controls first.")

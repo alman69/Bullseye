@@ -71,7 +71,7 @@ int main() {
   runFor(s, 1200);
   assert(s.angle(0) == 90);
 
-  // Squeeze: both sticks move together through down -> out -> in.
+  // Squeeze: both sticks move together through directly to 60 degrees.
   assert(s.squeeze());
   assert(s.state() == State::Sequence);
   assert(!s.home());  // Busy until stopped or finished.
@@ -80,14 +80,31 @@ int main() {
     runFor(s, 10);
     assert(s.angle(0) == s.angle(1));  // Simultaneous: always level with each other.
     if (s.angle(0) == kOutDeg) sawOut = true;
-    assert(s.angle(0) >= kOutDeg && s.angle(0) <= kInDeg);
+    assert(s.angle(0) >= kOutDeg && s.angle(0) <= kDownDeg);
   }
   assert(sawOut);
   assert(s.state() == State::Holding);
   for (uint8_t i = 0; i < kJointCount; ++i) {
-    assert(s.angle(i) == kInDeg);
-    assert(out.last[i] == expectedServo(i, kInDeg));  // Mirrored for the inverted stick.
+    assert(s.angle(i) == kSqueezeDeg);
+    assert(out.last[i] == expectedServo(i, kSqueezeDeg));  // Mirrored for the inverted stick.
   }
+
+  // No timer automatically releases a completed squeeze; PWM keeps holding.
+  runFor(s, 60000);
+  assert(s.state() == State::Holding);
+  for (uint8_t i = 0; i < kJointCount; ++i) {
+    assert(s.angle(i) == kSqueezeDeg && out.attached[i]);
+  }
+
+  // Explicit Let go moves to 140 degrees and keeps holding there.
+  assert(s.release());
+  runFor(s, 5000);
+  assert(s.state() == State::Holding);
+  assert(s.angle(0) == kReleaseDeg && s.angle(1) == kReleaseDeg);
+  runFor(s, 60000);
+  assert(s.angle(0) == kReleaseDeg && s.angle(1) == kReleaseDeg);
+  assert(s.squeeze());
+  runFor(s, 5000);
 
   // Stop mid-release freezes where the sticks are.
   assert(s.release());
@@ -95,7 +112,7 @@ int main() {
   s.stop();
   assert(s.state() == State::Holding);
   const int frozen = s.angle(1);
-  assert(frozen < kInDeg && frozen > kOutDeg);
+  assert(frozen < kReleaseDeg && frozen > kSqueezeDeg);
   runFor(s, 2000);
   assert(s.angle(1) == frozen);
 

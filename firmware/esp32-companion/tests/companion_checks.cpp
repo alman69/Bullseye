@@ -149,7 +149,7 @@ void bleChecks() {
     if (now % 500 == 0) assert(apply(control, bleFrame(0, 0), now) == Result::Applied);
     control.tick(now, true);
   }
-  assert(control.arm().angle(0) == scooper::kInDeg && !control.watchdogStopped());
+  assert(control.arm().angle(0) == scooper::kSqueezeDeg && !control.watchdogStopped());
 }
 void orderAndTimeoutChecks() {
   Servos output; Control<Servos> control(output);
@@ -176,7 +176,7 @@ void orderAndTimeoutChecks() {
   Servos localOutput; Control<Servos> local(localOutput); local.begin(0, 1);
   assert(local.local(Command::Squeeze, 0) == nullptr);
   for (uint32_t now = 10; now < 6000; now += 10) local.tick(now, false);
-  assert(local.arm().state() == scooper::State::Holding && local.arm().angle(0) == scooper::kInDeg);
+  assert(local.arm().state() == scooper::State::Holding && local.arm().angle(0) == scooper::kSqueezeDeg);
   CommandOrder wrapped; wrapped.begin(9); assert(wrapped.accept(9, UINT32_MAX)); wrapped.fence();
   assert(wrapped.sequence() == UINT32_MAX && !wrapped.accept(9, 1));
 }
@@ -238,8 +238,9 @@ void sharedLoopChecks() {
   }
   assert(acks == 11 && telemetry.state(5000) == bullseye::ViewState::Live);
   assert(screen.writes > firstWrites + 100);
-  assert(control.arm().state() == scooper::State::Holding && control.arm().angle(0) == scooper::kInDeg);
-  assert(lostHttp.watchdogStopped() && lostHttp.arm().angle(0) < scooper::kInDeg);
+  assert(control.arm().state() == scooper::State::Holding && control.arm().angle(0) == scooper::kSqueezeDeg);
+  // The short 60-degree move finishes before contact timeout; it must keep holding.
+  assert(!lostHttp.watchdogStopped() && lostHttp.arm().angle(0) == scooper::kSqueezeDeg);
   assert(telemetry.face.mood(5000) == bullseye::Mood::Curious);
 }
 int main() {

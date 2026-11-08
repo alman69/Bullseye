@@ -1,5 +1,6 @@
 # Bullseye team handoff (for teammates and their AI assistants)
 
+
 ## Current integration — 2026-11-08
 
 The local integration combines the preserved vision/calibration work (`c6f3a91`) with
@@ -13,9 +14,11 @@ with no GitHub publishing. Check the actual branch/log for completion status.
 - Accepted examples and masks are saved immediately in `software/vision/config.json`. Restarting
   the server or rover does not erase them. A stale second server cannot silently overwrite newer
   calibration. The saved camera preset is reapplied when the real stream reconnects.
-- **Servo squeezing is retired.** Reaching ore signals a sample; there is no physical grasping
-  or required pickup/deposit step. The UI has no squeeze control; old scooper commands are rejected. Firmware experiments are retained as history and have not
-  been flashed as part of this integration. Use the display-only guide for telemetry.
+- **Manual squeezer controls are restored on `/bench`.** Claim the pilot seat, then
+  Connect/Reconnect, Squeeze, Release, or Straight down. Driving can stay disabled.
+  STOP also stops the squeezer. With combined companion firmware, stop `send-display.sh`
+  first: Mission Control owns the shared BLE session. Automatic ore missions still use
+  LED/display signalling without actuating the squeezer. No firmware was flashed.
 - **Red and green are ore targets; blue is an obstacle.** Yellow remains a calibration class.
   A mission stops at the ore, turns the rover LEDs green, and shows a happy/excited display response.
   It then automatically searches for the actual home flag and returns from the current heading.
@@ -82,7 +85,7 @@ reports below are historical unless updated explicitly. **Restart the server aft
 - Arduino UNO R3, ESP32-WROVER camera (Wi-Fi access point), TB6612, MPU6050, ultrasonic sensor and
   camera on one pan servo, RGB LEDs.
 - A separate **ESP32-S3 touchscreen** shows telemetry over BLE (`docs/BLE_DISPLAY.md`).
-- Two **SG90 servo** experiments are archived (§3); servo squeezing is retired in the active setup.
+- Two **SG90 servos** have restored manual controls; prior hardware experiments are recorded in §3.
 
 ## 2. Who started what (everyone may change anything)
 

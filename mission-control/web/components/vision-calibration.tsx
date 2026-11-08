@@ -140,6 +140,7 @@ function ColorsTab({ vision, ui, canAct, act }: { vision: VisionSummary; ui: Vis
         {c.label} <small>{counts[c.id] ? `${counts[c.id]} saved` : "built-in"}</small>
       </button>)}
     </div>
+    <p className="vision-help"><b>Floor looking green?</b> Choose Floor (white / tinted), then click an empty patch of that floor. Add both white and green-tinted patches; each example saves automatically. Sample the floor itself, away from ores.</p>
     <p className="vision-note">{selected ? `Sampling ${selected.label}: click a solid patch away from edges and glare.` : "Start with built-in colors. Sample only materials that need adjustment."}</p>
     <div className="vision-actions">
       <Button size="sm" variant="outline" disabled={!canAct || !vision.palette?.can_undo} onClick={() => void act("vision_palette_undo")}>Undo calibration</Button>

@@ -1,6 +1,7 @@
 # Separate BLE telemetry display
 
-The servo squeeze feature is retired. Use the **standalone display firmware and
+
+For display-only operation, use the **standalone display firmware and
 read-only sender** below for telemetry and the ore-arrival happy animation.
 The [combined companion sketch](../firmware/esp32-companion/README.md) remains
 archived/compatible source; it is not needed for this display-only workflow.

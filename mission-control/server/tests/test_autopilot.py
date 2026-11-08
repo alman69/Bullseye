@@ -338,3 +338,28 @@ def test_sample_signal_drives_display_expression_and_clears_on_stop(vision):
     assert bench.snapshot()['bench']['auto']['expression'] == 'happy'
     bench._report('stopped', 'STOP')
     assert bench.snapshot()['bench']['auto']['expression'] == 'auto'
+
+
+class FlickerWorld(World):
+    """A false target (e.g. a shadow read as home) flickers into view during every turn, but is
+    never there in the frame the autopilot decides on."""
+
+    def __init__(self, vision):
+        super().__init__(vision, block_x=400, visible=False)
+
+    async def pulse(self, direction, speed, duration_ms):
+        await super().pulse(direction, speed, duration_ms)
+        if direction in ("left", "right"):
+            self.visible = True
+            self.show()
+            self.visible = False
+
+
+def test_flickering_false_target_does_not_cause_endless_back_and_forth(vision):
+    world = FlickerWorld(vision)
+    with pytest.raises(AutopilotError):
+        asyncio.run(world.drive(Autopilot(world, vision).go_to("red", max_steps=30)))
+    turns = [d for d, _ in world.steps if d in ("left", "right")]
+    reversals = sum(a != b for a, b in zip(turns, turns[1:]))
+    assert reversals <= len(turns) // 3, turns                     # mostly keeps searching one way
+    assert any(d == "forward" for d, _ in world.steps)            # and still gets to explore

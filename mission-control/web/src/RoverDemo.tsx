@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { CameraView } from "@/components/camera-view";
 import { VisionCalibration } from "@/components/vision-calibration";
 import { VisionPanel } from "@/components/vision-panel";
+import { ScooperPanel } from "@/components/scooper-panel";
 import { AutopilotPanel } from "@/components/autopilot-panel";
 import { useVisionUi } from "@/hooks/use-vision-ui";
 import { useMission } from "@/hooks/use-mission";
@@ -87,6 +88,7 @@ export default function RoverDemo() {
                 {bench?.error && <p className="bench-inline-error" role="status">{bench.error}</p>}
               </div>
             </section>
+            <ScooperPanel scooper={bench?.scooper} canUse={connected && isPilot} onAction={(kind) => void act(kind)} />
             <section className="panel bench-controls" aria-label="Rover direction controls">
               <div className="panel-heading"><div className="heading-icon"><CircleDot size={16} /><h2>Drive controls</h2></div><span className="micro">KEYBOARD + BUTTONS</span></div>
               <div className="bench-panel-body">

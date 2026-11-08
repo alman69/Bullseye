@@ -12,7 +12,7 @@ Camera-guided sample missions with a laptop-hosted Mission Control dashboard.
 - [Separate ESP32-S3 BLE distance display and Mac sender](docs/BLE_DISPLAY.md)
 - [Autonomous approach, arrival checks, and the exploration roadmap](docs/AUTONOMY_PLAN.md)
 - [Integration PR description](docs/INTEGRATION_PR.md)
-- Historical servo experiments: [combined companion](firmware/esp32-companion/README.md) and [standalone scooper](firmware/esp32-scooper/README.md). Servo squeezing is retired; these guides are archives, not the current setup.
+- Manual squeezer control: [combined companion](firmware/esp32-companion/README.md) and [standalone scooper](firmware/esp32-scooper/README.md). Connect, Squeeze, Release, and Straight down are available on `/bench`; STOP stops the squeezer too. Automatic ore missions continue to use LED/display signalling.
 - [Vendor source references and attribution](docs/SOURCE_REFERENCES.md)
 
 After setup, run `./mission-control/run.sh` and open http://localhost:8000.

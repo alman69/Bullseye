@@ -25,6 +25,13 @@ class PaletteTests(unittest.TestCase):
                 image = np.tile(bgr(hsv[0], hsv[1], min(255, round(hsv[2] * brightness))), (20, 20, 1))
                 self.assertTrue(np.all(palette.labels(image) == palette.index(name)), (name, brightness))
 
+    def test_white_and_green_tinted_floor_preserve_green_ore(self):
+        white = np.tile(bgr(0, 8, 230), (100, 1))
+        tinted = np.tile(bgr(60, 70, 210), (100, 1))
+        palette = ArenaPalette({"floor": [fit_patch(white, "floor"), fit_patch(tinted, "floor")]})
+        image = np.array([[white[0], tinted[0], bgr(60, 200, 180)]])
+        self.assertEqual(palette.labels(image).tolist(), [[6, 6, 1]])
+
     def test_red_wrap_and_unknown_magenta(self):
         image = np.array([[bgr(179, 230, 210), bgr(1, 230, 210), bgr(150, 240, 220)]])
         self.assertEqual(ArenaPalette().labels(image).tolist(), [[0, 0, -1]])

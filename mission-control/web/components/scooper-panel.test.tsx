@@ -14,7 +14,7 @@ it("sends squeeze, release and straight-down when the link is ready", () => {
   render(<ScooperPanel scooper={ready} canUse onAction={onAction} />);
   expect(screen.getByText("Straight down", { selector: "strong" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Squeeze" }));
-  fireEvent.click(screen.getByRole("button", { name: "Release" }));
+  fireEvent.click(screen.getByRole("button", { name: "Let go" }));
   fireEvent.click(screen.getByRole("button", { name: "Straight down" }));
   expect(onAction.mock.calls.map(([kind]) => kind)).toEqual(["scooper_squeeze", "scooper_release", "scooper_home"]);
 });
@@ -30,7 +30,7 @@ it("only offers Connect until the Wi-Fi link is ready", () => {
 
 it("locks the buttons for viewers and while a squeeze is running", () => {
   const { rerender } = render(<ScooperPanel scooper={ready} canUse={false} onAction={vi.fn()} />);
-  for (const name of ["Squeeze", "Release", "Straight down", "Reconnect"])
+  for (const name of ["Squeeze", "Let go", "Straight down", "Reconnect"])
     expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(true);
   rerender(<ScooperPanel scooper={{ ...ready, state: "sequence", sequence: "squeeze", step: "in", angles: { left: 140, right: 140 } }} canUse onAction={vi.fn()} />);
   expect(screen.getByText("Squeezing · in")).toBeTruthy();
@@ -61,7 +61,7 @@ it("keeps BLE connected while disabling motion for an actual servo fault", () =>
   render(<ScooperPanel scooper={{ ...ready, transport: "ble", address: "BLE · Bullseye-Display", ble_connected: true, servo_ready: false, display_updates: 8, error: "Servo PWM unavailable; motion disabled" }} canUse onAction={onAction} />);
   expect(screen.getByText("BLE connected · scooper PWM unavailable")).toBeTruthy();
   expect(screen.getByText(/BLE connected. 8 display updates acknowledged/)).toBeTruthy();
-  for (const name of ["Squeeze", "Release", "Straight down"])
+  for (const name of ["Squeeze", "Let go", "Straight down"])
     expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Squeeze" }));
   expect(onAction).not.toHaveBeenCalled();
@@ -79,4 +79,14 @@ it("shows control heartbeat diagnostics and identifies commanded positions", () 
 it("reports observed boot changes without claiming they are spontaneous resets", () => {
   render(<ScooperPanel scooper={{ ...ready, transport: "ble", device_boot_id: 42, device_boot_changes: 1 }} canUse onAction={vi.fn()} />);
   expect(screen.getByText(/S3 boot changes observed: 1 \(includes manual resets\)/)).toBeTruthy();
+});
+
+ it("holds the squeezed pose until Let go without repeating squeeze", () => {
+  const onAction = vi.fn();
+  render(<ScooperPanel scooper={{ ...ready, angles: { left: 60, right: 60 } }} canUse onAction={onAction} />);
+  expect(screen.getByText("Squeezed · holding until Let go")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Squeeze" }).hasAttribute("disabled")).toBe(true);
+  expect(onAction).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Let go" }));
+  expect(onAction).toHaveBeenCalledWith("scooper_release");
 });

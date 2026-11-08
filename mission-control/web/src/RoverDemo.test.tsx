@@ -167,11 +167,12 @@ it("clears a physically held key on disconnect and never resumes it after reconn
   expect(act).toHaveBeenLastCalledWith("hold_start", expect.objectContaining({ arm_token: "reconnected" }));
 });
 
-it("omits scooper controls even when the backend reports a ready scooper", () => {
+it("restores pilot scooper controls without enabling rover driving", () => {
   state.bench!.armed = false;
   state.bench!.scooper = { available: true, status: "ready", address: "http://192.168.4.50", error: null, state: "holding", sequence: null, step: null, angles: { left: 90, right: 90 }, busy: null };
   render(<RoverDemo />);
-  expect(screen.queryByRole("button", { name: "Squeeze" })).toBeNull();
-  expect(screen.queryByRole("region", { name: /scooper/i })).toBeNull();
-  expect(act).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Squeeze" }).hasAttribute("disabled")).toBe(false);
+  expect(screen.getByRole("region", { name: /scooper/i })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Squeeze" }));
+  expect(act).toHaveBeenCalledWith("scooper_squeeze");
 });

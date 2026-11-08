@@ -40,7 +40,7 @@ def decode_status(data):
     releasing = bool(flags & 16)
     if state == "sequence" and not 1 <= step <= 3 or state != "sequence" and step != 0:
         raise ProtocolError("Invalid companion sequence step")
-    labels = ("out", "down") if releasing else ("down", "out", "in")
+    labels = ("letting go",) * 2 if releasing else ("squeezing",) * 3
     if state == "sequence" and step > len(labels):
         raise ProtocolError("Invalid companion step index")
     return result, reply, {

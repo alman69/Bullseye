@@ -1,5 +1,6 @@
 # PR title
 
+
 Integrate ore missions and automatic home return with saved palette calibration
 
 ## Summary
@@ -17,8 +18,7 @@ The home gate stays narrow while accepting near-black samples whose HSV saturati
 The `/bench` mission approaches red or green ore and stops. Reaching the ore signals the demo sample
 with green rover LEDs and a happy/excited display response, then automatically starts home search and
 return. LEDs start red, stay green through return, and reset red at home. There is no manual pickup
-or deposit step; this marks arrival and does not claim physical grasping. Servo squeezing remains
-retired, including rejection of old command endpoints. Historical firmware experiments remain in the repository; this change does not flash devices.
+or deposit step; this marks arrival and does not claim physical grasping. Manual servo controls are restored on `/bench`; autonomous missions do not actuate them. Historical firmware experiments remain in the repository; this change does not flash devices.
 
 ## Navigation changes
 
