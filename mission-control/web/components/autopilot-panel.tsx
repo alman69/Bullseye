@@ -5,7 +5,7 @@ import type { MissionState } from "@/lib/protocol";
 import { CLASS_HEX, displayName } from "@/lib/vision";
 
 const ORES = ["red", "green"] as const;
-const STAGES = ["Scan 360°", "Approach · 10 cm", "Drive + grab", "Bring home"];
+const STAGES = ["Scan 360°", "Approach · 15 cm", "Drive + grab", "Bring home"];
 const SEARCHING = ["running", "scanning", "relocating", "approaching"];
 
 /** Autonomous search and approach, then the pilot drives up, grabs the sample and brings it home. */
@@ -32,9 +32,9 @@ export function AutopilotPanel({ state, canStep, canAct, act, onStop }: {
   const name = displayName(target);
   const ready = canStep && !!token && !!state?.vision?.available && !inMission && !pending;
   const stage = complete ? 4 : pickup ? 2 : mode === "approaching" ? 1 : searching ? 0 : -1;
-  const title = pickup ? `Stopped 10 cm from the ${name}. You have control.`
+  const title = pickup ? `Stopped 15 cm from the ${name}. You have control.`
     : complete ? "Sample home. Mission complete."
-    : mode === "approaching" ? `Found the ${name}. Approaching to 10 cm.`
+    : mode === "approaching" ? `Found the ${name}. Approaching to 15 cm.`
     : mode === "relocating" ? "Exploring toward open space."
     : searching ? `Scanning all around for the ${name}.`
     : mode === "failed" ? "Search paused. Check the rover."
@@ -42,11 +42,11 @@ export function AutopilotPanel({ state, canStep, canAct, act, onStop }: {
     : "Choose a sample. Start the search.";
   const instruction = pickup ? "Autonomy is off. Drive up with WASD / arrow keys, Squeeze to grab it, drive it back to home base, then press Delivered."
     : complete ? "Delivery confirmed. Choose a sample to start another search."
-    : mode === "approaching" ? "The rover centers the sample and uses the ultrasonic sensor and camera to stop about 10 cm away."
+    : mode === "approaching" ? "The rover centers the sample and uses the ultrasonic sensor and camera to stop about 15 cm away."
     : mode === "relocating" ? "Not in the 360° scan. The rover drives toward the most open direction; at a wall it checks left and right by ultrasonic and takes the more open side. No second 360."
     : searching ? "One full 360° turn, checking the camera after each step. STOP is always available."
     : mode === "failed" || mode === "stopped" ? "Check the camera, sensor and surroundings, then start a new search."
-    : "One 360° scan → explore toward open space (checking sides at walls) until found. It stops 10 cm away and hands you the controls.";
+    : "One 360° scan → explore toward open space (checking sides at walls) until found. It stops 15 cm away and hands you the controls.";
   const distance = state?.distance_cm;
   const distanceLive = bench?.distance_status === "live" && distance != null;
   const range = distanceLive ? `${distance >= 150 ? "150+" : distance} cm`
@@ -70,7 +70,7 @@ export function AutopilotPanel({ state, canStep, canAct, act, onStop }: {
       <div className="autopilot-readouts" aria-label="Mission telemetry">
         <div><span>Target</span><strong style={{ color: CLASS_HEX[target] }}>{name}</strong></div>
         <div className={distanceLive ? "range-live" : "range-unavailable"}><span>Ultrasonic range</span><strong>{range}</strong></div>
-        <div><span>Stop distance</span><strong>10 <small>cm</small></strong></div>
+        <div><span>Stop distance</span><strong>15 <small>cm</small></strong></div>
       </div>
       <div className={`autopilot-guidance ${pickup ? "needs-action" : complete ? "complete" : ""}`} role="status" aria-atomic="true">
         <h3>{title}</h3>

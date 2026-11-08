@@ -1,7 +1,7 @@
 # Sample search and manual grab
 
 The `/bench` sample mission finds the selected **ruby** (red) or **emerald** (green), stops about
-10 cm in front of it and hands the rover to the pilot. The pilot drives up, squeezes the gripper,
+15 cm in front of it and hands the rover to the pilot. The pilot drives up, squeezes the gripper,
 drives the sample back to home base and presses **Delivered**. The rover never grabs or drives home
 by itself. The code is `mission-control/server/bullseye/autopilot.py` (one short loop).
 
@@ -22,12 +22,12 @@ behaviour (Claim controls → Connect rover bridge → Enable controls).
 2. **Found → approach.** Turn to center the sample, then step forward. Steps are 15 cm while the
    gap is over 35 cm and the sample is high in the image, 7.5 cm closer in, and 2.7 cm when it is
    nearly at the bottom of the image. The gap is the closer of the sonar reading and the camera's
-   ground estimate. Stop at 10 cm **plus a leeway** (`navigation.stop_buffer_cm`, default 2 cm,
-   slider "Stop early by" — so normally about 12 cm, 1 cm more for whole-centimetre sonar), or
+   ground estimate. Stop at **15 cm** (1 cm early for whole-centimetre sonar) plus any extra leeway
+   from `navigation.stop_buffer_cm` (slider "Stop early by", default 0), or
    when the sample's bottom edge reaches `navigation.arrive_bottom_y` (default 0.85), which covers
    paper balls below the sonar beam. Near the end each step covers at most 60% of the remaining
    room, so a step that runs long (battery, floor) still stops short of the sample; the test
-   suite checks steps 40% longer than calibrated never get closer than 10 cm. A blue obstacle in
+   suite checks steps 40% longer than calibrated never get closer than 15 cm. A blue obstacle in
    the path stops the search.
 3. **Not found → explore.** Turn to the heading with the most ultrasonic room from the scan and
    drive forward in steps of up to 15 cm, checking the camera and sonar between steps, until the
@@ -52,7 +52,7 @@ caused the repeated 360° scans). Only blue obstacles block in the camera.
 - Turn and forward steps come from the measured step table (Calibration → Steps). Battery, PWM and
   floor change them; re-measure if scans fall short of 360° or approaches over/undershoot.
 - The sonar measures from the sensor, not the gripper tips. Measure that offset and the final gap
-  for both samples from several headings before trusting "10 cm".
+  for both samples from several headings before trusting "15 cm".
 - `arrive_bottom_y` is a guess until checked with the real paper ball and gripper mask; calibrate
   the ground stop line for a camera distance estimate.
 - There is no map or odometry: "open space" is the best direction from one scan, not a guarantee

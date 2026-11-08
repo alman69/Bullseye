@@ -7,7 +7,7 @@ Red and green are selectable ore targets. Blue is an obstacle, not an ore target
 available as a calibrated material. The selected ore is the approach target. The overlay names red
 **RUBY**, green **EMERALD** and blue **OBSTACLE**.
 The sample mission on `/bench` scans 360° for the ruby or emerald. When it is absent the rover drives
-toward the most open direction by ultrasonic, then scans again. It approaches to about 10 cm and
+toward the most open direction by ultrasonic, then scans again. It approaches to about 15 cm and
 stops; you drive up, squeeze to grab it, drive it home and press Delivered.
 Green rover LEDs and a happy display signal arrival; they do not confirm physical pickup.
 See the [autonomy plan](AUTONOMY_PLAN.md) for current limits and the exploration roadmap.

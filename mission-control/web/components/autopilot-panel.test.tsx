@@ -16,7 +16,7 @@ const missionState = (mode: NonNullable<NonNullable<MissionState["bench"]>["auto
   bench: { ...state.bench, armed: false, arm_token: null, auto: { state: mode, message: "", target: "green", run_id: "run-1" } },
 }) as MissionState;
 
-it("starts the ruby/emerald search and explains the 360 scan, 10 cm stop and manual handover", async () => {
+it("starts the ruby/emerald search and explains the 360 scan, 15 cm stop and manual handover", async () => {
   const act = vi.fn().mockResolvedValue(true);
   render(<AutopilotPanel {...props} state={state} act={act} />);
   expect(screen.queryByRole("button", { name: /blue|obstacle/i })).toBeNull();
@@ -24,7 +24,7 @@ it("starts the ruby/emerald search and explains the 360 scan, 10 cm stop and man
   expect(screen.queryByRole("button", { name: /Return to base/ })).toBeNull();
   expect(screen.getByRole("status").textContent).toContain("hands you the controls");
   expect(screen.getByRole("list", { name: "Mission steps" }).textContent).toContain("Scan 360°");
-  expect(screen.getByRole("list", { name: "Mission steps" }).textContent).toContain("10 cm");
+  expect(screen.getByRole("list", { name: "Mission steps" }).textContent).toContain("15 cm");
   fireEvent.click(screen.getByRole("button", { name: "emerald" }));
   expect(act).toHaveBeenCalledWith("vision_target", { color: "green" });
   fireEvent.click(screen.getByRole("button", { name: "Search for the emerald" }));
@@ -40,7 +40,7 @@ it("stays disabled until the rover is connected while keeping STOP available", (
   expect(onStop).toHaveBeenCalledTimes(1);
 });
 
-it("hands over to manual driving at 10 cm, then confirms home delivery", async () => {
+it("hands over to manual driving at 15 cm, then confirms home delivery", async () => {
   const act = vi.fn().mockResolvedValue(true);
   const { rerender } = render(<AutopilotPanel {...props} state={missionState("manual_pickup")} act={act} />);
   expect(screen.getByRole("status").textContent).toContain("Squeeze to grab it");

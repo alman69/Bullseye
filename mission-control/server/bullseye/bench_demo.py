@@ -492,7 +492,7 @@ class BenchControl:
                     color = payload.get("color")
                     if color not in NAMES:
                         raise CommandError("Choose the ruby or the emerald. Blue is an obstacle.")
-                    label = f"Search for the {NAMES[color]}: scan 360°, drive toward open space if needed, stop 10 cm away, then hand over for manual pickup"
+                    label = f"Search for the {NAMES[color]}: scan 360°, drive toward open space if needed, stop 15 cm away, then hand over for manual pickup"
                     job = lambda pilot: pilot.mission(color, avoid=avoid)
                     self.auto = {"state": "running", "message": label, "target": color, "run_id": uuid4().hex}
                     self.direction, self.drive_mode = "auto", "auto"

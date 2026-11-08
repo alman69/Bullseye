@@ -1,8 +1,8 @@
-"""Simple autonomy: find the selected color, stop about 10 cm in front of it, hand over.
+"""Simple autonomy: find the selected color, stop about 15 cm in front of it, hand over.
 
     1. One 360° scan: turn right in measured steps, checking the camera after each one and
        recording an ultrasonic reading for every heading. This is the only full turn.
-    2. Color seen -> approach: turn to center it, step forward, stop about 10 cm away.
+    2. Color seen -> approach: turn to center it, step forward, stop about 15 cm away.
     3. Not seen -> face the heading with the most ultrasonic room and explore: drive forward
        (camera and sonar checked between steps) until a wall is near. A close wall means the
        sample is probably not that way, so check left and right with the sonar (camera still
@@ -22,9 +22,9 @@ import time
 RED, GREEN = (255, 0, 0), (0, 255, 0)
 NAMES = {"red": "ruby", "green": "emerald"}   # what the operator sees
 
-STOP_CM = 10.0          # final gap in front of the sample
-SONAR_MARGIN_CM = 1.0   # the sonar reports whole centimetres: stop one centimetre early, never short of 10
-STOP_BUFFER_CM = 2.0    # default leeway: aim to stop this much before 10 cm so the sample is never hit
+STOP_CM = 15.0          # final gap in front of the sample
+SONAR_MARGIN_CM = 1.0   # the sonar reports whole centimetres: stop one centimetre early, never short of 15
+STOP_BUFFER_CM = 0.0    # optional extra leeway on top of STOP_CM (slider "Stop early by")
 STEP_SHARE = 0.6        # near the end a step covers at most this share of the remaining room (step-table error)
 FAR_STEP_CM = 15.0      # longest forward step when there is lots of room (one 1 s pulse)
 NEAR_STEP_CM = 7.5      # forward step once the sample is within FAR_GAP_CM or low in the image
@@ -287,7 +287,7 @@ class Autopilot:
         return step
 
     async def approach(self, color, det):
-        """Center the target and step forward until about 10 cm away. Returns (arrived, last detection)."""
+        """Center the target and step forward until about 15 cm away. Returns (arrived, last detection)."""
         name = NAMES[color]
         misses, last = 0, det
         while True:
@@ -326,7 +326,7 @@ class Autopilot:
         return min(readings) if readings else None
 
     async def find(self, color):
-        """One 360° scan, then explore by sonar until the color is found; stop about 10 cm in front of it."""
+        """One 360° scan, then explore by sonar until the color is found; stop about 15 cm in front of it."""
         self._check_tables()
         self.vision.set_target(color)
         self.deadline = time.monotonic() + SEARCH_LIMIT_S
@@ -355,12 +355,12 @@ class Autopilot:
             det, _ = await self.pick_open_side(color)
 
     async def mission(self, color, avoid=True):
-        """Find the sample, stop about 10 cm away, and hand over to the pilot for pickup and return."""
+        """Find the sample, stop about 15 cm away, and hand over to the pilot for pickup and return."""
         if color not in NAMES:
             raise AutopilotError("Choose the ruby or the emerald. Blue is an obstacle.")
         await self._led(RED)
         await self.find(color)
         await self._led(GREEN)
-        self.report("manual_pickup", f"Stopped about 10 cm from the {NAMES[color]}. Drive up, squeeze to grab it, "
+        self.report("manual_pickup", f"Stopped about 15 cm from the {NAMES[color]}. Drive up, squeeze to grab it, "
                                      "drive it home, then press Delivered.")
         return True

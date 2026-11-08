@@ -25,7 +25,7 @@ restart. Use the same checkout or `BULLSEYE_VISION_DIR` to keep using that calib
 On `/bench` the rover connects (and reconnects) by itself and the controls stay on; STOP is always
 available. Choose the ruby (red) or emerald (green) and start a search. The rover scans 360°; if the
 sample is absent it explores toward the most open direction the ultrasonic sensor finds, checking
-left and right at walls (no second 360). Once found it approaches to about 10 cm and stops. You then drive up, squeeze the gripper,
+left and right at walls (no second 360). Once found it approaches to about 15 cm and stops. You then drive up, squeeze the gripper,
 drive the sample home and press Delivered. See [docs/AUTONOMY_PLAN.md](docs/AUTONOMY_PLAN.md).
 Blue is an obstacle; yellow remains available for calibration. Motion uses timed calibration and
-still needs supervised physical validation; camera size alone never confirms the 10 cm stop.
+still needs supervised physical validation; camera size alone never confirms the 15 cm stop.

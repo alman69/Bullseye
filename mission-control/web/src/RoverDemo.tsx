@@ -69,7 +69,7 @@ export default function RoverDemo() {
         <div className="bench-header-right"><span className="micro">REAL ROVER · SEARCH + DRIVE</span><Button className="stop-button" onClick={() => void stop()} aria-label="STOP rover"><Square size={12} fill="currentColor" /> STOP</Button></div>
       </header>
       <main className="bench-main">
-        <div className="bench-title"><div><p className="eyebrow">ROVER OPERATIONS / 01</p><h1>Find it. Bring it home<span>.</span></h1><p>Choose the ruby or the emerald. The rover finds it and stops 10 cm away; you drive up, grab it and bring it home.</p></div><span className={`bench-pill ${bench?.armed ? "ready" : ""}`}><CircleDot size={14} />{bench?.direction ? `${bench.direction.toUpperCase()} · ${bench.drive_mode === "hold" ? "KEYBOARD" : "STEP"}` : bench?.stop_pending ? "STOP REQUESTED" : bench?.armed ? "CONTROLS ENABLED" : "CONTROLS DISABLED"}</span></div>
+        <div className="bench-title"><div><p className="eyebrow">ROVER OPERATIONS / 01</p><h1>Find it. Bring it home<span>.</span></h1><p>Choose the ruby or the emerald. The rover finds it and stops 15 cm away; you drive up, grab it and bring it home.</p></div><span className={`bench-pill ${bench?.armed ? "ready" : ""}`}><CircleDot size={14} />{bench?.direction ? `${bench.direction.toUpperCase()} · ${bench.drive_mode === "hold" ? "KEYBOARD" : "STEP"}` : bench?.stop_pending ? "STOP REQUESTED" : bench?.armed ? "CONTROLS ENABLED" : "CONTROLS DISABLED"}</span></div>
         {error && <div className="bench-error" role="alert">{error}<Button variant="ghost" onClick={clearError}>Dismiss</Button></div>}
         <div className="bench-grid" ref={stage}>
           <div className="bench-left">
