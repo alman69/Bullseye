@@ -78,8 +78,10 @@ class FreeSpace:
 
 
 def analyze_floor(frame_bgr: np.ndarray, settings: FloorSettings | None = None,
-                  exclude_mask: np.ndarray | None = None, floor_mask: np.ndarray | None = None) -> FreeSpace:
-    """`floor_mask` (full-frame 0/255, e.g. the classifier's "floor" class) replaces the HSV floor test."""
+                  exclude_mask: np.ndarray | None = None, floor_mask: np.ndarray | None = None,
+                  obstacle_mask: np.ndarray | None = None) -> FreeSpace:
+    """`floor_mask` (full-frame 0/255, e.g. the classifier's "floor" class) replaces the HSV floor test.
+    `obstacle_mask` (full-frame 0/255, e.g. yellow) is never floor, whatever the other masks say."""
     s = settings or FloorSettings()
     h, w = frame_bgr.shape[:2]
     top = min(h - 1, max(0, int(h * s.roi_top)))
@@ -102,6 +104,9 @@ def analyze_floor(frame_bgr: np.ndarray, settings: FloorSettings | None = None,
         if s.target_dilate and s.target_dilate > 1:
             ex = cv2.dilate(ex, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (s.target_dilate, s.target_dilate)))
         floor = cv2.bitwise_or(floor, ex)
+    if obstacle_mask is not None:
+        ob = cv2.resize(obstacle_mask[top:, :], (work_w, work_h), interpolation=cv2.INTER_NEAREST)
+        floor = cv2.bitwise_and(floor, cv2.bitwise_not(ob))
 
     from_bottom = floor[::-1] > 0                 # row 0 = bottom edge of the image
     not_floor = ~from_bottom
