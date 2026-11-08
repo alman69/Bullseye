@@ -7,8 +7,8 @@ Mission Control should use camera.CameraStream + detector.ColorDetector directly
 Keys (GUI):  r/y/g/b    select target color      c  toggle calibration window
              w          save HSV values to config s  save snapshot (raw, annotated, JSON)
              n          next image (offline folder) q / Esc  quit
-With --navigate (DRY RUN, never moves the rover):
-             f          toggle the floor-mask window  x  reset the planner
+With --navigate (floor check only, never moves the rover):
+             f          toggle the floor-mask window
 Color sampling for the classifier (k toggles sampling mode):
              1-7        choose the class: 1 red 2 green 3 blue 4 yellow 5 floor 6 cardboard 7 obstacle
              drag       add the pixels in the box to that class   u  undo the last box
@@ -33,7 +33,6 @@ from bullseye_vision.colorclass import SAMPLE_CLASSES, ColorModel, format_confus
 from bullseye_vision.config import DEFAULT_CONFIG_PATH, load_config, save_config
 from bullseye_vision.detector import COLORS, ColorDetector, Detection, HsvRange
 from bullseye_vision.pipeline import NavRunner
-from bullseye_vision.planner import BACKWARD, FORWARD, TURN_LEFT, TURN_RIGHT
 
 MAIN_WIN = "Bullseye Vision"
 CAL_WIN = "Calibration (mask)"
@@ -123,13 +122,10 @@ def waiting_image(text: str) -> np.ndarray:
     return img
 
 
-# ------------------------------------------------------------ navigation dry run
-ARROWS = {FORWARD: (0, -1), BACKWARD: (0, 1), TURN_LEFT: (-1, 0), TURN_RIGHT: (1, 0)}
-
-
+# ------------------------------------------------------------ floor check
 def draw_nav_overlay(img: np.ndarray, nav: NavRunner) -> np.ndarray:
     h, w = img.shape[:2]
-    free, action = nav.free, nav.action
+    free = nav.free
     if free is not None:
         top = free.roi_top_px
         roi_h = h - top
@@ -148,16 +144,7 @@ def draw_nav_overlay(img: np.ndarray, nav: NavRunner) -> np.ndarray:
         if not free.floor_visible:
             put_text(img, "NO FLOOR VISIBLE at the bottom edge: check camera view / floor s_max",
                      (10, top - 10), 0.5, (60, 60, 255))
-    state = nav.planner.state
-    put_text(img, f"DRY RUN (no motors)  state: {state}", (10, 124), 0.6, (0, 255, 255), 2)
-    if action is not None:
-        put_text(img, f"NEXT: {action.label()}", (10, 152), 0.75, (0, 255, 255), 2)
-        put_text(img, action.reason[:95], (10, 176), 0.5, (230, 230, 230))
-        if action.kind in ARROWS:
-            dx, dy = ARROWS[action.kind]
-            cx, cy = w // 2, h - 70
-            cv2.arrowedLine(img, (cx, cy), (cx + dx * 70, cy + dy * 50), (0, 255, 255), 5, tipLength=0.4)
-    put_text(img, "f floor mask   x reset planner", (10, 198), 0.45, (220, 220, 220))
+    put_text(img, "FLOOR CHECK (no motors)   f floor mask", (10, 124), 0.5, (0, 255, 255))
     return img
 
 
@@ -423,9 +410,6 @@ def run_gui(source, detector: ColorDetector, cfg: dict, args) -> None:
             source.next_image()
         elif key == ord("p"):
             state["probe_xy"] = None
-        elif key == ord("x") and nav is not None:
-            nav.reset()
-            print("planner reset")
         elif key == ord("f") and nav is not None:
             if floor_open:
                 cv2.destroyWindow(FLOOR_WIN)

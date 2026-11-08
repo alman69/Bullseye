@@ -1,46 +1,33 @@
-"""Shared per-frame pipeline: detection -> floor free-space -> planner decision.
+"""Shared per-frame pipeline: detection -> floor free-space check.
 
 Used by the standalone app (main.py --navigate) and by Mission Control's vision
-service. It only computes and reports actions; it never sends anything to the rover.
+service. It only measures the floor; it never sends anything to the rover. Motion
+decisions live in Mission Control's autopilot.
 """
 from __future__ import annotations
-
-import time
 
 import cv2
 import numpy as np
 
 from .detector import ColorDetector, Detection
 from .freespace import FloorSettings, analyze_floor
-from .planner import NavSettings, Planner
 
 
 class NavRunner:
-    """Dry run: floor check on every frame, one planner decision every
-    `decision_period_s` (roughly one move + settle in the real loop).
-    It only computes and displays actions; it never sends anything to the rover.
-    Vision only: the ultrasonic sensor is not read, so arrival is visual."""
+    """Floor check on every frame: where the floor is open and where obstacles block it."""
 
     def __init__(self, cfg: dict):
         self.floor = FloorSettings.from_dict(cfg["floor"])
-        self.settings = NavSettings.from_dict(cfg["navigation"])
         self.floor_class = cfg.get("classifier", {}).get("floor_class", "floor")
         # Blue obstacles always count as "not floor", even if they look pale.
         self.obstacle_colors = list(cfg.get("obstacles", {}).get("colors", ["blue"]))
-        self.planner = Planner(self.settings, use_distance=False,
-                               stop_line_y=cfg.get("ground", {}).get("stop_line_y"))
         self.free = None
         self.free_obstacles = None   # obstacle colors only (walls/shadows ignored): for driving up to a wall
-        self.action = None
-        self.next_at = 0.0
 
     def reset(self) -> None:
-        self.planner.reset()
-        self.action = None
-        self.next_at = 0.0
+        """Kept for callers that reset on a target change; the floor check has no state."""
 
     def update(self, frame, det: Detection, detector: ColorDetector, now: float | None = None, prepared=None):
-        now = time.monotonic() if now is None else now
         exclude = detector.mask(frame.image, det.target_color, prepared=prepared) if det.detected else None
         rover = detector.ignore_mask(frame.image.shape)   # the rover's own parts count as floor, never as obstacles
         if rover is not None:
@@ -56,11 +43,7 @@ class NavRunner:
         self.free = analyze_floor(frame.image, self.floor, exclude, floor_mask=floor_mask, obstacle_mask=obstacle)
         everything = np.full(frame.image.shape[:2], 255, np.uint8)
         self.free_obstacles = analyze_floor(frame.image, self.floor, None, floor_mask=everything, obstacle_mask=obstacle)
-        if now >= self.next_at:
-            fresh = now - frame.received_at < 1.0
-            self.action = self.planner.decide(det, self.free, None, camera_ok=fresh, now=now)
-            self.next_at = now + self.settings.decision_period_s
-        return self.action
+        return self.free
 
     @staticmethod
     def _without_rover_parts(obstacle: np.ndarray, rover: np.ndarray, max_ratio: float = 0.02) -> np.ndarray:
@@ -78,6 +61,4 @@ class NavRunner:
         return out
 
     def to_dict(self) -> dict:
-        return {"dry_run": True, "state": self.planner.state,
-                "action": self.action.to_dict() if self.action else None,
-                "free_space": self.free.to_dict() if self.free else None}
+        return {"free_space": self.free.to_dict() if self.free else None}

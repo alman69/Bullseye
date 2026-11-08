@@ -501,7 +501,7 @@ async def finish_sample_search(bench, monkeypatch):
     async def mission(pilot, color, avoid=True):
         assert color == "green" and avoid
         assert await pilot.bridge.stop()
-        pilot.report("awaiting_pickup", "Stopped at green. Pick up the material manually.")
+        pilot.report("manual_pickup", "Stopped about 10 cm from the emerald.")
         return True
 
     monkeypatch.setattr("bullseye.bench_demo.Autopilot.mission", mission)
@@ -512,33 +512,26 @@ async def finish_sample_search(bench, monkeypatch):
     return {"run_id": bench.auto["run_id"]}
 
 
-async def test_sample_arrival_disarms_and_requires_manual_pickup_and_delivery(bench, monkeypatch):
+async def test_arrival_hands_over_to_manual_driving_then_delivery(bench, monkeypatch):
     confirmation = await finish_sample_search(bench, monkeypatch)
-    assert bench.auto["state"] == "awaiting_pickup"
+    assert bench.auto["state"] == "manual_pickup"
     assert bench.auto["expression"] == "happy"
     assert bench.snapshot()["target"] == bench.auto["target"] == "green"
-    assert not bench.armed and bench.arm_token is None and bench.stopped
-    with pytest.raises(CommandError, match="Pick up"):
-        await bench.command("pilot", "bench_arm", {})
-    with pytest.raises(CommandError, match="Finish manual"):
-        await bench.command("pilot", "auto_mission", {"color": "red"})
+    assert bench.armed and bench.arm_token                       # the pilot can drive up and grab it
+    await bench.command("pilot", "bench_pulse", payload(bench))
+    await bench.bridge.pulse_started.wait()
+    bench.bridge.release_pulse.set()
+    await settle(bench)
+    assert bench.bridge.pulses == [("forward", 40, 200)]
     with pytest.raises(CommandError, match="Claim"):
-        await bench.command("viewer", "auto_pickup_confirm", confirmation)
+        await bench.command("viewer", "auto_home_confirm", confirmation)
     with pytest.raises(CommandError, match="no longer current"):
-        await bench.command("pilot", "auto_home_confirm", confirmation)
-    with pytest.raises(CommandError, match="no longer current"):
-        await bench.command("pilot", "auto_pickup_confirm", {"run_id": "previous-run"})
-    await bench.command("pilot", "auto_pickup_confirm", confirmation)
-    assert bench.auto["state"] == "manual_return" and not bench.armed
-    assert bench.bridge.pulses == []
-    with pytest.raises(CommandError, match="no longer current"):
-        await bench.command("pilot", "auto_pickup_confirm", confirmation)
-    await bench.command("pilot", "bench_arm", {})
+        await bench.command("pilot", "auto_home_confirm", {"run_id": "previous-run"})
     await bench.command("pilot", "auto_home_confirm", confirmation)
     await settle(bench)
-    assert bench.auto["state"] == "home_arrived" and not bench.armed
-    assert bench.auto["expression"] == "auto" and bench.arm_token is None
-    assert bench.bridge.pulses == []
+    assert bench.auto["state"] == "home_arrived" and bench.auto["expression"] == "auto"
+    with pytest.raises(CommandError, match="no longer current"):
+        await bench.command("pilot", "auto_home_confirm", confirmation)
 
 
 async def test_pending_pickup_survives_stop_and_pilot_disconnect(bench, monkeypatch):
@@ -547,20 +540,88 @@ async def test_pending_pickup_survives_stop_and_pilot_disconnect(bench, monkeypa
     await settle(bench)
     await bench.disconnect("pilot")
     await settle(bench)
-    assert bench.auto["state"] == "awaiting_pickup"
+    assert bench.auto["state"] == "manual_pickup"
     await bench.command("next-pilot", "claim", {})
-    await bench.command("next-pilot", "auto_pickup_confirm", confirmation)
-    assert bench.auto["state"] == "manual_return"
+    await bench.command("next-pilot", "auto_home_confirm", confirmation)
+    await settle(bench)
+    assert bench.auto["state"] == "home_arrived"
 
 
 async def test_home_confirmation_requires_stop_acknowledgement(bench, monkeypatch):
     confirmation = await finish_sample_search(bench, monkeypatch)
-    await bench.command("pilot", "auto_pickup_confirm", confirmation)
     monkeypatch.setattr(bench.bridge, "stop", AsyncMock(return_value=False))
     await bench.command("pilot", "auto_home_confirm", confirmation)
     await settle(bench)
-    assert bench.auto["state"] == "manual_return" and not bench.armed
-    assert not any("Pilot confirmed material delivered" in item["message"] for item in bench.events)
+    assert bench.auto["state"] == "manual_pickup"
+    assert not any("Pilot confirmed the sample" in item["message"] for item in bench.events)
+
+
+@pytest_asyncio.fixture
+async def auto_bench():
+    settings = Settings(mode="hardware", bench_enabled=True, bench_auto_on=True)
+    controller = BenchControl(settings, CameraHub(settings), FakeBridge())
+    await controller.start()
+    yield controller
+    await controller.close()
+
+
+async def wait_until(condition, timeout=2):
+    async with asyncio.timeout(timeout):
+        while not condition():
+            await asyncio.sleep(.01)
+
+
+async def test_auto_mode_connects_and_turns_controls_on_by_itself(auto_bench):
+    await wait_until(lambda: auto_bench.bridge.connected and auto_bench.armed)
+    assert auto_bench.arm_token and not auto_bench.stopped and auto_bench.bridge.pulses == []
+    await auto_bench.command("pilot", "claim", {})
+    await auto_bench.command("pilot", "bench_pulse", payload(auto_bench))   # no Connect or Enable needed
+    await auto_bench.bridge.pulse_started.wait()
+    auto_bench.bridge.release_pulse.set()
+    await settle(auto_bench)
+    assert auto_bench.bridge.pulses == [("forward", 40, 200)]
+
+
+async def test_auto_mode_stop_halts_then_controls_come_back_on(auto_bench):
+    await wait_until(lambda: auto_bench.armed)
+    await auto_bench.command("pilot", "claim", {})
+    old = payload(auto_bench)
+    await auto_bench.command("pilot", "bench_pulse", old)
+    await auto_bench.bridge.pulse_started.wait()
+    result = await auto_bench.stop()
+    assert result["phase"] == "stopped" and not result["bench"]["armed"]
+    await wait_until(lambda: auto_bench.armed)
+    assert auto_bench.arm_token != old["arm_token"]                # an old step can never replay
+    with pytest.raises(CommandError, match="outdated"):
+        await auto_bench.command("pilot", "bench_pulse", old)
+
+
+async def test_auto_mode_reconnects_after_the_bridge_drops(auto_bench):
+    await wait_until(lambda: auto_bench.armed)
+    auto_bench.bridge.status = "disconnected"                       # Wi-Fi blip / ESP32 dropped us
+    await wait_until(lambda: not auto_bench.armed)
+    await wait_until(lambda: auto_bench.bridge.connected and auto_bench.armed)
+    assert auto_bench.bridge.pulses == []                           # nothing replayed
+
+
+async def test_auto_mode_keeps_retrying_and_logs_the_failure_once(monkeypatch):
+    settings = Settings(mode="hardware", bench_enabled=True, bench_auto_on=True)
+    bridge = FakeBridge()
+    attempts = []
+
+    async def refuse():
+        attempts.append(time.monotonic())
+        raise ConnectionError("no rover")
+
+    bridge.connect = refuse
+    controller = BenchControl(settings, CameraHub(settings), bridge)
+    await controller.start()
+    try:
+        await wait_until(lambda: len(attempts) >= 2, timeout=4)
+        assert not controller.armed
+        assert sum("Retrying automatically" in event["message"] for event in controller.events) == 1
+    finally:
+        await controller.close()
 
 
 async def test_automatic_return_cannot_bypass_manual_delivery(bench):

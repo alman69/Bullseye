@@ -19,11 +19,15 @@ with no GitHub publishing. Check the actual branch/log for completion status.
   STOP also stops the squeezer. With combined companion firmware, stop `send-display.sh`
   first: Mission Control owns the shared BLE session. Automatic ore missions still use
   LED/display signalling without actuating the squeezer. No firmware was flashed.
-- **Red and green are ore targets; blue is an obstacle.** Yellow remains a calibration class.
-  A mission scans through a measured 360°, relocates using sonar clearance when absent, and
-  scans again. It approaches a stable target to about 10 cm using sonar, stops, and disables
-  motion. The user picks up the material by hand, confirms pickup, carries it home, and
-  confirms delivery. Green LEDs/happy display signal arrival, not physical collection.
+- **Red (shown as "ruby") and green ("emerald") are ore targets; blue ("obstacle") is an
+  obstacle.** Yellow remains a calibration class.
+- **2026-11-08 rewrite (`feature/simple-autopilot`):** the old pathfinding and the vision dry-run
+  planner (`planner.py`) are gone. The new `autopilot.py` loop: one 360° scan → if not found, drive
+  toward the heading with the most ultrasonic room; at a wall check left/right by sonar and take
+  the more open side (never a second 360) → once found, approach to about 10 cm → stop and hand the rover to the pilot, who drives up, squeezes, drives home and presses
+  Delivered. `/bench` now connects, reconnects and enables controls by itself; STOP still halts
+  everything (`BULLSEYE_BENCH_AUTO=0` restores the manual Claim/Connect/Enable flow).
+  See [AUTONOMY_PLAN.md](AUTONOMY_PLAN.md).
 - Home means near-black, not arbitrary dark gray: brightness ≤40/255 and RGB channel spread
   ≤12/255. Color alone cannot distinguish a truly black shadow from the flag.
 - Autonomy remains experimental timed approach/search. Obstacle avoidance stays on; search is
@@ -66,10 +70,10 @@ reports below are historical unless updated explicitly. **Restart the server aft
 
 **Mission:**
 1. A user chooses red or green ore in Mission Control.
-2. The rover scans 360°, relocates using fresh sonar when absent, and repeats.
+2. The rover scans 360° once, then explores toward the most open direction (ultrasonic), checking left/right at walls.
 3. It approaches the selected target to about 10 cm by sonar, stops, and disables motion.
-4. The user picks up the material by hand and confirms pickup.
-5. The user carries the material to home base and confirms delivery. The rover never returns automatically.
+4. The pilot drives up manually and squeezes the gripper to grab it.
+5. The pilot drives it to home base and presses Delivered. The rover never returns automatically.
 
 **Arena (as of 2026-11-08):**
 - **Floor and walls:** matte white floor; unpainted cardboard walls.
@@ -240,7 +244,7 @@ ESP32 camera ──MJPEG──► Mission Control server (FastAPI, Python 3.13)
                           ├─ camera.CameraHub ── the ONLY camera client ──► /ws/video (browser)
                           ├─ vision.VisionService (worker thread, newest frame):
                           │    camera preset → palette profiles
-                          │    → rover mask → detection → floor check → planner DRY RUN
+                          │    → rover mask → detection → floor check
                           │    ──► /ws/vision (overlay) + state.vision (panels)
                           ├─ bench_demo.FactoryBridge ── the ONLY port-100 client (/bench manual driving)
                           ├─ autopilot.Autopilot ── explicit /bench scan + approach + manual handoff
@@ -250,12 +254,12 @@ Separate: BLE sender reads the cached /api/bench/state → ESP32-S3 display
 ```
 
 **Current `/bench` sample mission:**
-1. Claim controls, connect the bridge, and enable controls. Select red or green ore.
-2. Start the search. The rover scans through a measured 360° turn. If absent, it selects
-   a nearby sonar-clear heading, relocates a bounded distance, and repeats the scan.
-3. On a stable target, align and approach using fresh sonar to about 10 cm. Stop and disable
-   motion; green LEDs and the happy display signal arrival.
-4. Pick up the material by hand and confirm pickup. Carry it to home base and confirm delivery.
+1. Open `/bench`; the page claims the pilot seat and the server connects and enables controls. Select ruby or emerald.
+2. Start the search. The rover scans through a measured 360° turn. If absent, it turns to the
+   heading with the most ultrasonic room and explores; at a wall it checks left/right and takes the more open side.
+3. On a stable target, align and approach to about 10 cm (sonar or camera). Stop and hand over;
+   green LEDs and the happy display signal arrival. Driving stays enabled.
+4. Drive up manually, squeeze to grab it, drive it home and press Delivered.
    Manual driving can be enabled separately after pickup if the rover also needs moving.
 
 Blue is an obstacle, never an ore destination. Yellow remains calibratable but is not a mission

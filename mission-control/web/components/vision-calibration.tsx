@@ -231,7 +231,7 @@ function StepsTab({ vision, canAct, act }: { vision: VisionSummary; canAct: bool
     <div>
       <p className="vision-help">
         On the <b>/bench</b> page at PWM 60, run each timed button 5 times and enter the average: forward in cm, turns in degrees.
-        The planner then sizes each turn and forward step from these.
+        The autopilot sizes each turn and forward step from these.
       </p>
       <table className="vision-steps">
         <thead><tr><th /> {DURATIONS.map((d) => <th key={d}>{Number(d) / 1000} s</th>)}</tr></thead>

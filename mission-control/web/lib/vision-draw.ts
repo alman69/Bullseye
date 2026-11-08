@@ -1,11 +1,4 @@
-import { CLASS_HEX, MASK_TOOL, normalizedBox, type VisionFrame, type VisionOverlayOptions } from "@/lib/vision";
-
-const ARROWS: Record<string, [number, number]> = {
-  forward: [0, -1],
-  backward: [0, 1],
-  turn_left: [-1, 0],
-  turn_right: [1, 0],
-};
+import { CLASS_HEX, MASK_TOOL, displayName, normalizedBox, type VisionFrame, type VisionOverlayOptions } from "@/lib/vision";
 
 /** Draw one vision result in frame pixel coordinates (the canvas is sized to the frame). */
 export function drawVision(
@@ -92,7 +85,7 @@ export function drawVision(
       ctx.strokeStyle = CLASS_HEX[name] ?? "#fff"; ctx.lineWidth = 2;
       for (const [x, y, bw, bh] of material.boxes) {
         ctx.strokeRect(x * w, y * h, bw * w, bh * h);
-        label(name === "cardboard" ? "WALL" : name === "home" ? "HOME?" : name.toUpperCase(),
+        label(name === "home" ? "HOME?" : displayName(name).toUpperCase(),
           x * w + 3, Math.max(font, y * h - 5), CLASS_HEX[name] ?? "#fff");
       }
     }
@@ -136,35 +129,7 @@ export function drawVision(
       ctx.arc(cx, cy, 5, 0, Math.PI * 2);
       ctx.fill();
       const dist = f.detection.distance_cm_est;
-      label(`${f.target.toUpperCase()}${dist != null ? ` ~${Math.round(dist)} cm` : ""}`, x * w, Math.max(font, y * h - 8), color);
-    }
-
-    // Planner DRY RUN: what it would do next.
-    if (f.nav.label) {
-      const text = `DRY RUN · ${f.nav.state} → ${f.nav.label}`;
-      const tw = ctx.measureText(text).width;
-      const by = h - font * 2.2;
-      ctx.fillStyle = "rgba(6,16,36,0.72)";
-      ctx.fillRect(w / 2 - tw / 2 - 12, by - font * 1.15, tw + 24, font * 1.7);
-      label(text, w / 2 - tw / 2, by, "#ffe14d");
-      const arrow = f.nav.action ? ARROWS[f.nav.action.kind] : undefined;
-      if (arrow) {
-        const [ax, ay] = [w / 2, by - font * 3];
-        ctx.strokeStyle = "#ffe14d";
-        ctx.fillStyle = "#ffe14d";
-        ctx.lineWidth = 5;
-        const [ex, ey] = [ax + arrow[0] * 55, ay + arrow[1] * 40];
-        ctx.beginPath();
-        ctx.moveTo(ax, ay);
-        ctx.lineTo(ex, ey);
-        ctx.stroke();
-        const angle = Math.atan2(ey - ay, ex - ax);
-        ctx.beginPath();
-        ctx.moveTo(ex + Math.cos(angle) * 10, ey + Math.sin(angle) * 10);
-        ctx.lineTo(ex + Math.cos(angle + 2.5) * 14, ey + Math.sin(angle + 2.5) * 14);
-        ctx.lineTo(ex + Math.cos(angle - 2.5) * 14, ey + Math.sin(angle - 2.5) * 14);
-        ctx.fill();
-      }
+      label(`${displayName(f.target).toUpperCase()}${dist != null ? ` ~${Math.round(dist)} cm` : ""}`, x * w, Math.max(font, y * h - 8), color);
     }
   }
   if (drag && o.samplingClass) {

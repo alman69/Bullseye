@@ -16,9 +16,6 @@ const summary: VisionSummary = {
   direction: "LEFT",
   horizontal_error: -0.31,
   distance_cm_est: 42,
-  nav_state: "APPROACH",
-  nav_label: "TURN LEFT 200 ms",
-  nav_reason: "Aim at target",
   fps: 9.8,
   processing_ms: 6.1,
   message: null,
@@ -85,9 +82,9 @@ describe("VisionCalibration", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/Legacy detection/);
     expect(screen.getByRole("button", { name: /Black home base/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Brown wall/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Red sample/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Green sample/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Blue obstacle/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Ruby \(red\)/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Emerald \(green\)/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Obstacle \(blue\)/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Yellow material/ })).toBeTruthy();
   });
 
@@ -104,15 +101,15 @@ describe("VisionCalibration", () => {
 });
 
 describe("VisionPanel", () => {
-  it("shows detection and the dry-run plan, and picks the vision target on /bench", () => {
+  it("shows detection with ruby/emerald names and picks the vision target on /bench", () => {
     const act = vi.fn().mockResolvedValue(true);
     render(<VisionPanel vision={summary} ui={ui()} canAct act={act} targetControl />);
-    expect(screen.getByText("RED DETECTED")).toBeTruthy();
-    expect(screen.getByText(/APPROACH → TURN LEFT 200 ms/)).toBeTruthy();
+    expect(screen.getByText("RUBY DETECTED")).toBeTruthy();
+    expect(screen.queryByText(/DRY RUN|Planner/i)).toBeNull();
     expect(screen.getByText(/~42 cm/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "blue" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /blue|obstacle/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "yellow" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "green" }));
+    fireEvent.click(screen.getByRole("button", { name: "emerald" }));
     expect(act).toHaveBeenCalledWith("vision_target", { color: "green" });
     fireEvent.click(screen.getByRole("button", { name: "home" }));
     expect(act).toHaveBeenCalledWith("vision_target", { color: "home" });

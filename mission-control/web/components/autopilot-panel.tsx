@@ -1,13 +1,14 @@
 import { useRef, useState } from "react";
-import { Check, Flag, Hand, Navigation, Square } from "lucide-react";
+import { Check, Flag, Navigation, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { MissionState } from "@/lib/protocol";
-import { CLASS_HEX } from "@/lib/vision";
+import { CLASS_HEX, displayName } from "@/lib/vision";
 
 const ORES = ["red", "green"] as const;
-const STAGES = ["Scan 360°", "Approach · 10 cm", "Pick up", "Bring home"];
+const STAGES = ["Scan 360°", "Approach · 10 cm", "Drive + grab", "Bring home"];
+const SEARCHING = ["running", "scanning", "relocating", "approaching"];
 
-/** Autonomous search and approach, followed by an explicit manual pickup and return. */
+/** Autonomous search and approach, then the pilot drives up, grabs the sample and brings it home. */
 export function AutopilotPanel({ state, canStep, canAct, act, onStop }: {
   state: MissionState | null;
   canStep: boolean;
@@ -23,31 +24,29 @@ export function AutopilotPanel({ state, canStep, canAct, act, onStop }: {
   const auto = bench?.auto;
   const mode = auto?.state ?? "idle";
   const token = bench?.arm_token;
-  const searching = ["running", "scanning", "relocating", "approaching", "arrived"].includes(mode);
-  const pickup = mode === "awaiting_pickup" || mode === "sample_reached";
-  const returning = mode === "manual_return";
+  const searching = SEARCHING.includes(mode);
+  const pickup = mode === "manual_pickup";
   const complete = mode === "home_arrived" || mode === "done";
-  const inMission = searching || pickup || returning;
+  const inMission = searching || pickup;
   const target = inMission ? auto?.target ?? color : color;
+  const name = displayName(target);
   const ready = canStep && !!token && !!state?.vision?.available && !inMission && !pending;
-  const stage = complete ? 4 : returning ? 3 : pickup ? 2 : ["approaching", "arrived"].includes(mode) ? 1 : searching ? 0 : -1;
-  const title = pickup ? "Rover stopped. Your turn to collect."
-    : returning ? "Carry the material to home base."
-    : complete ? "Material home. Mission complete."
-    : mode === "approaching" || mode === "arrived" ? `Found ${target}. Approaching 10 cm.`
-    : mode === "relocating" ? "Moving to an open space."
-    : searching ? `Scanning all around for ${target}.`
+  const stage = complete ? 4 : pickup ? 2 : mode === "approaching" ? 1 : searching ? 0 : -1;
+  const title = pickup ? `Stopped 10 cm from the ${name}. You have control.`
+    : complete ? "Sample home. Mission complete."
+    : mode === "approaching" ? `Found the ${name}. Approaching to 10 cm.`
+    : mode === "relocating" ? "Exploring toward open space."
+    : searching ? `Scanning all around for the ${name}.`
     : mode === "failed" ? "Search paused. Check the rover."
-    : mode === "stopped" ? "Stopped. Controls disabled."
-    : "Choose a color. Start the search.";
-  const instruction = pickup ? "Manually grab the material, then confirm below. Rover movement is disabled for pickup."
-    : returning ? "Bring the material back yourself, then confirm it is home. To drive the rover back too, enable controls and use the direction pad."
-    : complete ? "Your pickup and home delivery are confirmed. Choose a color to start another search."
-    : mode === "approaching" || mode === "arrived" ? "The rover aligns with the color and uses fresh ultrasonic readings to stop about 10 cm away."
-    : mode === "relocating" ? "No target in the full scan. The rover checks ultrasonic clearance, moves to a nearby opening, then scans again."
-    : searching ? "The rover turns in steps through a full 360° if needed. Watch the camera; STOP is always available."
-    : mode === "failed" || mode === "stopped" ? "Check the camera, sensor and surroundings. Enable controls when ready to start a new search."
-    : "Scan all around → move to a nearby open space if needed → repeat. Once found, stop at 10 cm for your manual pickup.";
+    : mode === "stopped" ? "Stopped."
+    : "Choose a sample. Start the search.";
+  const instruction = pickup ? "Autonomy is off. Drive up with WASD / arrow keys, Squeeze to grab it, drive it back to home base, then press Delivered."
+    : complete ? "Delivery confirmed. Choose a sample to start another search."
+    : mode === "approaching" ? "The rover centers the sample and uses the ultrasonic sensor and camera to stop about 10 cm away."
+    : mode === "relocating" ? "Not in the 360° scan. The rover drives toward the most open direction; at a wall it checks left and right by ultrasonic and takes the more open side. No second 360."
+    : searching ? "One full 360° turn, checking the camera after each step. STOP is always available."
+    : mode === "failed" || mode === "stopped" ? "Check the camera, sensor and surroundings, then start a new search."
+    : "One 360° scan → explore toward open space (checking sides at walls) until found. It stops 10 cm away and hands you the controls.";
   const distance = state?.distance_cm;
   const distanceLive = bench?.distance_status === "live" && distance != null;
   const range = distanceLive ? `${distance >= 150 ? "150+" : distance} cm`
@@ -65,15 +64,15 @@ export function AutopilotPanel({ state, canStep, canAct, act, onStop }: {
   return <section className="panel autopilot-panel" aria-label="Sample mission">
     <div className="panel-heading">
       <div className="heading-icon"><Navigation size={16} /><h2>Sample mission</h2></div>
-      <span className={`micro ${mode === "failed" ? "warn-text" : "muted"}`}>{searching ? "ROVER SEARCHING" : pickup || returning ? "YOUR ACTION NEEDED" : complete ? "COMPLETE" : mode === "stopped" || mode === "failed" ? "STOPPED" : "READY WHEN YOU ARE"}</span>
+      <span className={`micro ${mode === "failed" ? "warn-text" : "muted"}`}>{searching ? "ROVER SEARCHING" : pickup ? "YOUR TURN · MANUAL CONTROL" : complete ? "COMPLETE" : mode === "stopped" || mode === "failed" ? "STOPPED" : "READY WHEN YOU ARE"}</span>
     </div>
     <div className="vision-body">
       <div className="autopilot-readouts" aria-label="Mission telemetry">
-        <div><span>Target color</span><strong style={{ color: CLASS_HEX[target] }}>{target}</strong></div>
+        <div><span>Target</span><strong style={{ color: CLASS_HEX[target] }}>{name}</strong></div>
         <div className={distanceLive ? "range-live" : "range-unavailable"}><span>Ultrasonic range</span><strong>{range}</strong></div>
         <div><span>Stop distance</span><strong>10 <small>cm</small></strong></div>
       </div>
-      <div className={`autopilot-guidance ${pickup || returning ? "needs-action" : complete ? "complete" : ""}`} role="status" aria-atomic="true">
+      <div className={`autopilot-guidance ${pickup ? "needs-action" : complete ? "complete" : ""}`} role="status" aria-atomic="true">
         <h3>{title}</h3>
         <p>{instruction}</p>
       </div>
@@ -82,18 +81,17 @@ export function AutopilotPanel({ state, canStep, canAct, act, onStop }: {
           <span>{index < stage ? <Check size={13} aria-hidden="true" /> : index + 1}</span>{label}
         </li>)}
       </ol>
-      {!inMission && <div className="vision-targets autopilot-colors" role="group" aria-label="Sample color">
+      {!inMission && <div className="vision-targets autopilot-colors" role="group" aria-label="Sample">
         {ORES.map((c) => <button key={c} type="button" className={`vision-chip ${color === c ? "selected" : ""}`}
-          style={{ "--chip": CLASS_HEX[c] } as React.CSSProperties} aria-pressed={color === c} disabled={!canAct || pending} onClick={() => { setColor(c); void act("vision_target", { color: c }); }}>{c}</button>)}
+          style={{ "--chip": CLASS_HEX[c] } as React.CSSProperties} aria-pressed={color === c} disabled={!canAct || pending} onClick={() => { setColor(c); void act("vision_target", { color: c }); }}>{displayName(c)}</button>)}
       </div>}
       <div className="autopilot-actions">
-        {pickup ? <Button className="autopilot-start" disabled={!canAct || pending || !auto?.run_id} onClick={() => void run("auto_pickup_confirm", { run_id: auto?.run_id })}><Hand size={16} /> I picked up the material</Button>
-          : returning ? <Button className="autopilot-start" disabled={!canAct || pending || !auto?.run_id} onClick={() => void run("auto_home_confirm", { run_id: auto?.run_id })}><Flag size={16} /> Material is at home base</Button>
-          : <Button className="autopilot-start" disabled={!ready} onClick={() => void run("auto_mission", { color, avoid: true, arm_token: token })}><Navigation size={16} />{searching ? "Search in progress…" : "Start sample search"}</Button>}
+        {pickup ? <Button className="autopilot-start" disabled={!canAct || pending || !auto?.run_id} onClick={() => void run("auto_home_confirm", { run_id: auto?.run_id })}><Flag size={16} /> Delivered to home base</Button>
+          : <Button className="autopilot-start" disabled={!ready} onClick={() => void run("auto_mission", { color, avoid: true, arm_token: token })}><Navigation size={16} />{searching ? "Search in progress…" : `Search for the ${displayName(color)}`}</Button>}
         <Button className="stop-button" aria-label="STOP sample mission" onClick={onStop}><Square size={14} fill="currentColor" /> STOP</Button>
       </div>
-      {!canAct && <p className="vision-note">{bench?.busy ? "Rover is working. STOP is available at any time." : "Connect and claim pilot controls to continue."}</p>}
-      {canAct && !inMission && !canStep && <p className="vision-note">Connect the rover bridge and enable controls to start.</p>}
+      {!canAct && <p className="vision-note">{bench?.busy ? "Rover is working. STOP is available at any time." : "Waiting for the pilot seat…"}</p>}
+      {canAct && !inMission && !canStep && <p className="vision-note">Connecting to the rover…</p>}
       {canAct && !inMission && canStep && !state?.vision?.available && <p className="vision-warning">Start the camera and vision feed before searching.</p>}
       {auto?.message && <div className="autopilot-detail"><span className="micro">LATEST ROVER UPDATE</span><p role={mode === "failed" ? "alert" : undefined} className={mode === "failed" ? "vision-warning" : "vision-message"}>{auto.message}</p></div>}
     </div>

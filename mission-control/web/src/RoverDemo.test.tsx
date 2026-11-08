@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import RoverDemo from "./RoverDemo";
 import type { MissionState } from "@/lib/protocol";
 
-const { useMissionMock, act, stop } = vi.hoisted(() => ({ useMissionMock: vi.fn(), act: vi.fn(async (_type: string, _payload?: Record<string, unknown>) => true), stop: vi.fn(async () => {}) }));
+const { useMissionMock, act, send, stop } = vi.hoisted(() => ({ useMissionMock: vi.fn(), act: vi.fn(async (_type: string, _payload?: Record<string, unknown>) => true), send: vi.fn(async (_type: string) => {}), stop: vi.fn(async () => {}) }));
 vi.mock("@/hooks/use-mission", () => ({ useMission: useMissionMock }));
 vi.mock("@/components/ui/halftone-nebula", () => ({ default: () => null }));
 vi.mock("@/components/camera-view", () => ({ CameraView: () => <div data-testid="camera">Shared live camera</div> }));
@@ -17,7 +17,7 @@ const initial: MissionState = {
   bench: { enabled: true, status: "ready", error: null, armed: true, arm_token: "first", busy: false, direction: null, stop_pending: false, heartbeats: 4, max_duration_ms: 1000, max_speed: 100 },
 };
 let state: MissionState;
-const hook = (overrides = {}) => ({ state, connected: true, isPilot: true, act, stop, error: null, clearError: vi.fn(), latency: { status: "ready", rttMs: 12 }, ...overrides });
+const hook = (overrides = {}) => ({ state, connected: true, isPilot: true, act, send, stop, error: null, clearError: vi.fn(), latency: { status: "ready", rttMs: 12 }, ...overrides });
 beforeEach(() => { vi.useFakeTimers(); vi.clearAllMocks(); act.mockResolvedValue(true); state = structuredClone(initial); useMissionMock.mockImplementation(() => hook()); });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
@@ -177,27 +177,24 @@ it("restores pilot scooper controls without enabling rover driving", () => {
   expect(act).toHaveBeenCalledWith("scooper_squeeze");
 });
 
-it("keeps pickup confirmation available while disarmed and blocks enabling movement until pickup", async () => {
-  state.bench!.armed = false;
-  state.bench!.arm_token = null;
-  state.bench!.auto = { state: "awaiting_pickup", message: "Stopped at 10 cm.", target: "red", run_id: "pickup-run" };
+it("keeps driving enabled during the manual pickup and offers delivery confirmation", async () => {
+  state.bench!.armed = true;
+  state.bench!.arm_token = "tok";
+  state.bench!.auto = { state: "manual_pickup", message: "Stopped about 10 cm away.", target: "red", run_id: "pickup-run" };
   render(<RoverDemo />);
-  expect(screen.getByRole("button", { name: "Enable controls" }).hasAttribute("disabled")).toBe(true);
-  expect(screen.getByRole("button", { name: "Step forward" }).hasAttribute("disabled")).toBe(true);
-  const confirm = screen.getByRole("button", { name: "I picked up the material" });
-  expect(confirm.hasAttribute("disabled")).toBe(false);
-  await flushReact(async () => { fireEvent.click(confirm); });
-  expect(act).toHaveBeenCalledWith("auto_pickup_confirm", { run_id: "pickup-run" });
+  expect(screen.getByRole("button", { name: "Step forward" }).hasAttribute("disabled")).toBe(false);
+  const home = screen.getByRole("button", { name: "Delivered to home base" });
+  await flushReact(async () => { fireEvent.click(home); });
+  expect(act).toHaveBeenCalledWith("auto_home_confirm", { run_id: "pickup-run" });
 });
 
-it("allows optional manual driving after pickup with a separate home delivery confirmation", async () => {
-  state.bench!.armed = false;
-  state.bench!.arm_token = null;
-  state.bench!.auto = { state: "manual_return", message: "Bring material home.", target: "green", run_id: "return-run" };
+it("auto mode takes the free pilot seat and hides the manual connect/enable buttons", async () => {
+  state.pilot_id = null;
+  state.bench!.auto_on = true;
   render(<RoverDemo />);
-  expect(screen.getByRole("button", { name: "Enable controls" }).hasAttribute("disabled")).toBe(false);
-  const home = screen.getByRole("button", { name: "Material is at home base" });
-  expect(home.hasAttribute("disabled")).toBe(false);
-  await flushReact(async () => { fireEvent.click(home); });
-  expect(act).toHaveBeenCalledWith("auto_home_confirm", { run_id: "return-run" });
+  await flushReact(async () => {});
+  expect(send).toHaveBeenCalledWith("claim");
+  expect(screen.queryByRole("button", { name: "Enable controls" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Claim controls" })).toBeNull();
+  expect(screen.getByRole("button", { name: "STOP rover" })).toBeTruthy();
 });

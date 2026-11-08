@@ -4,12 +4,11 @@ Mission Control now defaults to a small, explicit color palette (`classifier.mod
 It detects **red, green, blue, yellow, brown cardboard walls, and black home-base candidates**
 in the same frame. White floor is a background class, used by the existing free-space check.
 Red and green are selectable ore targets. Blue is an obstacle, not an ore target; yellow remains
-available as a calibrated material. The selected ore is the approach target. The vision planner
-preview is diagnostic and does not drive by itself.
-The sample mission on `/bench` scans for red or green through a measured 360° turn. When the
-color is absent it relocates a bounded distance using ultrasonic clearance, then scans again.
-It approaches a stable target to about 10 cm using fresh sonar, stops, and disables controls.
-Pick up the material by hand, confirm pickup, carry it to home base, and confirm delivery.
+available as a calibrated material. The selected ore is the approach target. The overlay names red
+**RUBY**, green **EMERALD** and blue **OBSTACLE**.
+The sample mission on `/bench` scans 360° for the ruby or emerald. When it is absent the rover drives
+toward the most open direction by ultrasonic, then scans again. It approaches to about 10 cm and
+stops; you drive up, squeeze to grab it, drive it home and press Delivered.
 Green rover LEDs and a happy display signal arrival; they do not confirm physical pickup.
 See the [autonomy plan](AUTONOMY_PLAN.md) for current limits and the exploration roadmap.
 

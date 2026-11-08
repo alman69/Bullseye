@@ -5,9 +5,9 @@ import { MASK_TOOL } from "@/lib/vision";
 import { VisionFreezeControls, VisionOverlay } from "./vision-overlay";
 
 const { frame } = vi.hoisted(() => ({ frame: {
-  type: "vision", seq: 1, w: 800, h: 600, target: "red", mode: "palette", dry_run: true,
+  type: "vision", seq: 1, w: 800, h: 600, target: "red", mode: "palette",
   detection: { detected: false, direction: "NONE", horizontal_error: null, distance_cm_est: null, area_ratio: null, candidates: 0 }, box: null, center: null, others: [], deadband: 0.12,
-  free: null, nav: { state: "SEARCH", label: null, action: null }, lines: { stop: null, zone: null, horizon: null },
+  free: null, lines: { stop: null, zone: null, horizon: null },
   wb: null, processing_ms: 1, fps: 10,
 } }));
 vi.mock("@/hooks/use-vision-feed", () => ({ useVisionFeed: (cb: (f: VisionFrame) => void) => cb(frame as VisionFrame) }));

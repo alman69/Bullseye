@@ -9,7 +9,6 @@ export type VisionFrame = {
   h: number;
   target: string;
   mode: "hsv" | "classifier" | "palette";
-  dry_run: true;
   detection: {
     detected: boolean;
     direction: string;
@@ -33,7 +32,6 @@ export type VisionFrame = {
     blocked_height: number;
     floor_visible: boolean;
   } | null;
-  nav: { state: string; label: string | null; action: { kind: string; reason: string } | null };
   lines: { stop: number | null; zone: number | null; horizon: number | null };
   wb: number[] | null;
   processing_ms: number;
@@ -43,7 +41,6 @@ export type VisionFrame = {
 export type VisionSummary = {
   available: boolean;
   error: string | null;
-  dry_run?: boolean;
   target?: string;
   mode?: "hsv" | "classifier" | "palette";
   classes?: string[];
@@ -56,9 +53,6 @@ export type VisionSummary = {
   direction?: string | null;
   horizontal_error?: number | null;
   distance_cm_est?: number | null;
-  nav_state?: string | null;
-  nav_label?: string | null;
-  nav_reason?: string | null;
   fps?: number;
   processing_ms?: number | null;
   message?: string | null;
@@ -94,6 +88,10 @@ export type VisionOverlayOptions = {
 
 export const VISION_TARGETS = ["red", "green", "home"] as const;
 
+/** What the operator sees for each internal color id (the server and config keep red/green/blue). */
+export const DISPLAY_NAMES: Record<string, string> = { red: "ruby", green: "emerald", blue: "obstacle", cardboard: "wall", home: "home" };
+export const displayName = (id: string) => DISPLAY_NAMES[id] ?? id;
+
 /** Special "sampling class": dragging adds a rover-mask box instead of color samples. */
 export const MASK_TOOL = "__rover_mask__";
 
@@ -105,9 +103,9 @@ export const CAMERA_TUNING: { key: string; label: string; hint: string }[] = [
 ];
 
 export const SAMPLE_CLASSES: { id: string; label: string; hex: string; key: string }[] = [
-  { id: "red", label: "Red sample", hex: "#f06b7c", key: "1" },
-  { id: "green", label: "Green sample", hex: "#65c79b", key: "2" },
-  { id: "blue", label: "Blue obstacle", hex: "#79aaf4", key: "3" },
+  { id: "red", label: "Ruby (red)", hex: "#f06b7c", key: "1" },
+  { id: "green", label: "Emerald (green)", hex: "#65c79b", key: "2" },
+  { id: "blue", label: "Obstacle (blue)", hex: "#79aaf4", key: "3" },
   { id: "yellow", label: "Yellow material", hex: "#f2d15c", key: "4" },
   { id: "floor", label: "Floor (white / tinted)", hex: "#e9e6de", key: "5" },
   { id: "cardboard", label: "Brown wall", hex: "#c0925e", key: "6" },
@@ -126,8 +124,8 @@ export const TUNING: { key: string; label: string; min: number; max: number; ste
   { key: "navigation.aim_deadband", label: "Centered within", min: 0.02, max: 0.4, step: 0.01, hint: "Fraction of half the image counted as CENTER." },
   { key: "navigation.arrive_distance_cm", label: "Stop distance (cm)", min: 2, max: 60, step: 1, hint: "Moves the stop line once the ground is calibrated." },
   { key: "navigation.approach_zone_y", label: "Approach zone height", min: 0, max: 0.3, step: 0.01, hint: "Band above the stop line with tiny steps." },
-  { key: "navigation.search_turn_ms", label: "Search turn (ms)", min: 100, max: 1000, step: 100, hint: "Measured: 1000 ms ≈ 49° at PWM 60." },
-  { key: "navigation.avoid_turn_ms", label: "Avoid turn (ms)", min: 100, max: 1000, step: 100, hint: "Turn used to go around obstacles." },
+  { key: "navigation.arrive_bottom_y", label: "Arrive at image bottom", min: 0.5, max: 1, step: 0.01, hint: "Sample's bottom edge this low in the image counts as 10 cm away (paper below the sonar beam)." },
+  { key: "navigation.wall_distance_cm", label: "Wall margin (cm)", min: 10, max: 60, step: 1, hint: "Driving toward open space stops this far from a wall." },
 ];
 
 /** Where an image of size w x h lands inside an element drawn with object-fit: contain. */

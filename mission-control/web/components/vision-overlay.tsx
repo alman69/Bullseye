@@ -26,7 +26,7 @@ export function VisionOverlay(options: VisionOverlayOptions) {
   const draw = useCallback(() => {
     const el = canvas.current;
     const frozen = opts.current.frozen?.frame;
-    const f = frozen ? { ...frozen, nav: { ...frozen.nav, label: null }, mask_boxes: frame.current?.mask_boxes ?? frozen.mask_boxes,
+    const f = frozen ? { ...frozen, mask_boxes: frame.current?.mask_boxes ?? frozen.mask_boxes,
       mask_polygons: frame.current?.mask_polygons ?? frozen.mask_polygons } : frame.current;
     const ctx = el?.getContext("2d");
     if (!el || !f || !ctx) return;

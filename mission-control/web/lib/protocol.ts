@@ -54,6 +54,7 @@ export type MissionState = {
     error: string | null;
     armed: boolean;
     arm_token: string | null;
+    auto_on?: boolean; // server connects, reconnects and enables controls by itself
     busy: boolean;
     direction: string | null;
     stop_pending: boolean;
@@ -66,7 +67,7 @@ export type MissionState = {
     distance_age_ms?: number | null;
     scooper?: ScooperState;
     auto?: {
-      state: "idle" | "running" | "scanning" | "relocating" | "approaching" | "arrived" | "sample_reached" | "awaiting_pickup" | "manual_return" | "home_arrived" | "done" | "failed" | "stopped";
+      state: "idle" | "running" | "scanning" | "relocating" | "approaching" | "manual_pickup" | "home_arrived" | "done" | "failed" | "stopped";
       message: string;
       target?: "red" | "green" | "home";
       run_id?: string;

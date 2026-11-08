@@ -1,5 +1,4 @@
-"""Bullseye laptop vision: color-target detection, floor free-space check and the
-navigation planner, used by the standalone test app (software/vision/main.py) and by
+"""Bullseye laptop vision: color-target detection and a floor free-space check, used by the standalone test app (software/vision/main.py) and by
 Mission Control's vision service (mission-control/server/bullseye/vision.py).
 
 Settings and the learned color model live next to this package in software/vision/

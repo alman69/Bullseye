@@ -79,6 +79,7 @@ DEFAULTS: dict = {
         "glimpse_hfov_deg": 50,
         "camera_latency_s": 0.15,
         "wall_distance_cm": 25,
+        "arrive_bottom_y": 0.85,        # autopilot: sample's bottom edge this low = right in front
         "decision_period_s": 0.5,
         "arrival_mode": "camera",
         "approach_zone_y": 0.08,

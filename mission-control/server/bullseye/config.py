@@ -15,6 +15,9 @@ class Settings:
     collection_seconds: float = 0.8
     fail_collection_once: bool = False
     bench_enabled: bool = False
+    # Real rover: connect (and reconnect) the command bridge and keep the controls on by
+    # itself. STOP still halts at once. Off by default for tests; from_env() turns it on.
+    bench_auto_on: bool = False
     rover_host: str = "192.168.4.1"
     rover_port: int = 100
     scooper_url: str = "http://192.168.4.50"  # Scooper ESP32-S3 on the rover's ELEGOO Wi-Fi.
@@ -48,6 +51,7 @@ class Settings:
             camera_url=os.getenv("CAMERA_STREAM_URL", "http://192.168.4.1:81/stream" if bench else ""),
             fail_collection_once=os.getenv("BULLSEYE_SIM_FAIL_COLLECTION_ONCE", "0") == "1",
             bench_enabled=bench,
+            bench_auto_on=os.getenv("BULLSEYE_BENCH_AUTO", "1") == "1",
             rover_host=os.getenv("ROVER_HOST", "192.168.4.1"),
             rover_port=int(os.getenv("ROVER_PORT", "100")),
             scooper_url=os.getenv("SCOOPER_URL", "http://192.168.4.50"),

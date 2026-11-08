@@ -54,7 +54,7 @@ def test_processes_simulated_rocks(vision_dir):
         result = svc._process(CameraHub(Settings()).render_scene(), 1)
         assert result["detection"]["detected"], color
         assert result["box"] and all(0 <= v <= 1 for v in result["box"])
-        assert result["nav"]["state"] and result["dry_run"] is True
+        assert "nav" not in result and "dry_run" not in result
         json.dumps(result)
 
 
@@ -65,7 +65,6 @@ def test_result_on_arena_frame(vision_dir):
     det = result["detection"]
     assert det["detected"] and det["direction"] == "RIGHT"
     assert len(result["free"]["heights"]) == 5
-    assert result["nav"]["label"]
     summary = svc.summary()
     assert summary["available"] and summary["detected"] and summary["direction"] == "RIGHT"
     json.dumps(summary)
@@ -338,7 +337,6 @@ def test_palette_detects_all_six_simulated_materials(vision_dir):
     assert set(result["materials"]) == {"red", "green", "blue", "yellow", "cardboard", "home"}
     assert all(material["detected"] for material in result["materials"].values())
     assert result["mode"] == "palette"
-    assert result["dry_run"] is True
 
 
 def test_calibration_conflict_clears_stale_undo_and_cached_pixels(vision_dir):

@@ -22,10 +22,10 @@ The current setup keeps click-to-calibrate colors and traced rover masks. Each a
 is saved immediately in `software/vision/config.json` and loaded again after a server or device
 restart. Use the same checkout or `BULLSEYE_VISION_DIR` to keep using that calibration.
 
-On `/bench`, choose red or green material and start a search. The rover scans through a measured
-360° turn; if the color is absent, it uses ultrasonic readings to select a nearby clear heading,
-moves a bounded distance, and scans again. Once the color is centered, fresh ultrasonic readings
-guide the approach to about 10 cm. The rover stops, disables motion, and asks you to pick up the
-material by hand and carry it to home base. Confirm pickup and then delivery in the UI.
+On `/bench` the rover connects (and reconnects) by itself and the controls stay on; STOP is always
+available. Choose the ruby (red) or emerald (green) and start a search. The rover scans 360°; if the
+sample is absent it explores toward the most open direction the ultrasonic sensor finds, checking
+left and right at walls (no second 360). Once found it approaches to about 10 cm and stops. You then drive up, squeeze the gripper,
+drive the sample home and press Delivered. See [docs/AUTONOMY_PLAN.md](docs/AUTONOMY_PLAN.md).
 Blue is an obstacle; yellow remains available for calibration. Motion uses timed calibration and
 still needs supervised physical validation; camera size alone never confirms the 10 cm stop.

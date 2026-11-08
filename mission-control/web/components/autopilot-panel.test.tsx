@@ -16,73 +16,67 @@ const missionState = (mode: NonNullable<NonNullable<MissionState["bench"]>["auto
   bench: { ...state.bench, armed: false, arm_token: null, auto: { state: mode, message: "", target: "green", run_id: "run-1" } },
 }) as MissionState;
 
-it("starts the selected color search and explains the 360 scan, 10 cm stop and manual pickup", async () => {
+it("starts the ruby/emerald search and explains the 360 scan, 10 cm stop and manual handover", async () => {
   const act = vi.fn().mockResolvedValue(true);
   render(<AutopilotPanel {...props} state={state} act={act} />);
-  expect(screen.queryByRole("button", { name: "blue" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /blue|obstacle/i })).toBeNull();
   expect(screen.queryByRole("button", { name: "yellow" })).toBeNull();
   expect(screen.queryByRole("button", { name: /Return to base/ })).toBeNull();
-  expect(screen.getByRole("status").textContent).toContain("manual pickup");
+  expect(screen.getByRole("status").textContent).toContain("hands you the controls");
   expect(screen.getByRole("list", { name: "Mission steps" }).textContent).toContain("Scan 360°");
   expect(screen.getByRole("list", { name: "Mission steps" }).textContent).toContain("10 cm");
-  fireEvent.click(screen.getByRole("button", { name: "green" }));
+  fireEvent.click(screen.getByRole("button", { name: "emerald" }));
   expect(act).toHaveBeenCalledWith("vision_target", { color: "green" });
-  fireEvent.click(screen.getByRole("button", { name: "Start sample search" }));
+  fireEvent.click(screen.getByRole("button", { name: "Search for the emerald" }));
   expect(act).toHaveBeenCalledWith("auto_mission", { color: "green", avoid: true, arm_token: "tok" });
-  await waitFor(() => expect(screen.getByRole("button", { name: "Start sample search" }).hasAttribute("disabled")).toBe(false));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Search for the emerald" }).hasAttribute("disabled")).toBe(false));
 });
 
-it("stays disabled until controls are enabled while keeping STOP available", () => {
+it("stays disabled until the rover is connected while keeping STOP available", () => {
   const onStop = vi.fn();
   render(<AutopilotPanel {...props} state={state} canStep={false} canAct={false} act={vi.fn()} onStop={onStop} />);
-  expect(screen.getByRole("button", { name: "Start sample search" }).hasAttribute("disabled")).toBe(true);
+  expect(screen.getByRole("button", { name: "Search for the ruby" }).hasAttribute("disabled")).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "STOP sample mission" }));
   expect(onStop).toHaveBeenCalledTimes(1);
 });
 
-it("requires manual pickup and home confirmation even though rover controls are disabled", async () => {
+it("hands over to manual driving at 10 cm, then confirms home delivery", async () => {
   const act = vi.fn().mockResolvedValue(true);
-  const { rerender } = render(<AutopilotPanel {...props} state={missionState("awaiting_pickup")} canStep={false} act={act} />);
-  expect(screen.getByRole("status").textContent).toContain("Manually grab the material");
-  expect(screen.queryByRole("button", { name: "Start sample search" })).toBeNull();
-  expect(screen.getByRole("region", { name: "Sample mission" }).textContent).toContain("green");
-  const pickup = screen.getByRole("button", { name: "I picked up the material" });
-  expect(pickup.hasAttribute("disabled")).toBe(false);
-  fireEvent.click(pickup);
-  expect(act).toHaveBeenCalledWith("auto_pickup_confirm", { run_id: "run-1" });
-  await waitFor(() => expect(pickup.hasAttribute("disabled")).toBe(false));
-  rerender(<AutopilotPanel {...props} state={missionState("manual_return")} canStep={false} act={act} />);
-  expect(screen.getByRole("status").textContent).toContain("Bring the material back yourself");
-  fireEvent.click(screen.getByRole("button", { name: "Material is at home base" }));
+  const { rerender } = render(<AutopilotPanel {...props} state={missionState("manual_pickup")} act={act} />);
+  expect(screen.getByRole("status").textContent).toContain("Squeeze to grab it");
+  expect(screen.queryByRole("button", { name: /Search for/ })).toBeNull();
+  expect(screen.getByRole("region", { name: "Sample mission" }).textContent).toContain("emerald");
+  const delivered = screen.getByRole("button", { name: "Delivered to home base" });
+  fireEvent.click(delivered);
   expect(act).toHaveBeenCalledWith("auto_home_confirm", { run_id: "run-1" });
-  await waitFor(() => expect(screen.getByRole("button", { name: "Material is at home base" }).hasAttribute("disabled")).toBe(false));
-  rerender(<AutopilotPanel {...props} state={missionState("home_arrived")} canStep={false} act={act} />);
+  await waitFor(() => expect(delivered.hasAttribute("disabled")).toBe(false));
+  rerender(<AutopilotPanel {...props} state={missionState("home_arrived")} act={act} />);
   expect(screen.getByRole("status").textContent).toContain("Mission complete");
   expect(act.mock.calls.some(([type]) => type === "auto_return")).toBe(false);
 });
 
-it("blocks confirmations for viewers and prevents repeated pending submissions", async () => {
+it("blocks delivery for viewers and prevents repeated pending submissions", async () => {
   let finish!: (accepted: boolean) => void;
   const act = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
-  const { rerender } = render(<AutopilotPanel {...props} state={missionState("awaiting_pickup")} canStep={false} canAct={false} act={act} />);
-  const pickup = screen.getByRole("button", { name: "I picked up the material" });
-  expect(pickup.hasAttribute("disabled")).toBe(true);
-  rerender(<AutopilotPanel {...props} state={missionState("awaiting_pickup")} canStep={false} act={act} />);
-  fireEvent.click(pickup);
-  fireEvent.click(pickup);
+  const { rerender } = render(<AutopilotPanel {...props} state={missionState("manual_pickup")} canAct={false} act={act} />);
+  const delivered = screen.getByRole("button", { name: "Delivered to home base" });
+  expect(delivered.hasAttribute("disabled")).toBe(true);
+  rerender(<AutopilotPanel {...props} state={missionState("manual_pickup")} act={act} />);
+  fireEvent.click(delivered);
+  fireEvent.click(delivered);
   expect(act).toHaveBeenCalledTimes(1);
-  expect(pickup.hasAttribute("disabled")).toBe(true);
+  expect(delivered.hasAttribute("disabled")).toBe(true);
   finish(true);
-  await waitFor(() => expect(pickup.hasAttribute("disabled")).toBe(false));
+  await waitFor(() => expect(delivered.hasAttribute("disabled")).toBe(false));
 });
 
 it("shows actual mission target and scan updates without hiding failures or stale range", () => {
   const active = missionState("scanning");
   active.bench!.auto!.message = "Scanning 180° / 360°";
   const { rerender } = render(<AutopilotPanel {...props} state={active} canStep={false} canAct={false} act={vi.fn()} />);
-  expect(screen.getByRole("status").textContent).toContain("for green");
+  expect(screen.getByRole("status").textContent).toContain("for the emerald");
   expect(screen.getByText("Scanning 180° / 360°")).toBeTruthy();
-  expect(screen.queryByRole("group", { name: "Sample color" })).toBeNull();
+  expect(screen.queryByRole("group", { name: "Sample" })).toBeNull();
   const failed = missionState("failed");
   failed.bench!.auto!.message = "Ultrasonic reading unavailable. Stopped.";
   failed.bench!.distance_status = "stale";
@@ -92,10 +86,10 @@ it("shows actual mission target and scan updates without hiding failures or stal
   expect(screen.queryByText("42 cm")).toBeNull();
 });
 
-it("shows the newly selected target after completing a different color mission", () => {
+it("shows the newly selected target after completing a different sample mission", () => {
   render(<AutopilotPanel {...props} state={missionState("home_arrived")} act={vi.fn()} />);
-  fireEvent.click(screen.getByRole("button", { name: "red" }));
+  fireEvent.click(screen.getByRole("button", { name: "ruby" }));
   const telemetry = screen.getByLabelText("Mission telemetry");
-  expect(within(telemetry).getByText("red")).toBeTruthy();
-  expect(within(telemetry).queryByText("green")).toBeNull();
+  expect(within(telemetry).getByText("ruby")).toBeTruthy();
+  expect(within(telemetry).queryByText("emerald")).toBeNull();
 });

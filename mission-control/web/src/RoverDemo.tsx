@@ -14,7 +14,7 @@ import { useRoverKeyboard } from "@/hooks/use-rover-keyboard";
 const SKY = { planetX: 0.74, planetY: 0.2 };
 
 export default function RoverDemo() {
-  const { state, connected, isPilot, act, stop, error, clearError, latency } = useMission("/ws/bench", "/api/bench/stop");
+  const { state, connected, isPilot, act, send, stop, error, clearError, latency } = useMission("/ws/bench", "/api/bench/stop");
   const canCalibrate = connected && isPilot && !state?.bench?.busy && !state?.bench?.stop_pending;
   const visionUi = useVisionUi(act, canCalibrate);
   const [speed, setSpeed] = useState(40);
@@ -52,9 +52,15 @@ export default function RoverDemo() {
     previous.current = { connected, isPilot };
   }, [connected, isPilot, stop]);
 
+  // Auto mode: take the free pilot seat as soon as this page connects (one pilot at a time).
+  const autoOn = !!bench?.auto_on;
+  const seatFree = !!state && !state.pilot_id;
+  useEffect(() => {
+    if (autoOn && connected && seatFree) void send("claim").catch(() => {});
+  }, [autoOn, connected, seatFree, send]);
+
   const bridgeReady = bench?.status === "ready";
   const busy = !!(bench?.busy || bench?.stop_pending);
-  const awaitingPickup = bench?.auto?.state === "awaiting_pickup";
   return <>
     <div className="nebula-backdrop" aria-hidden="true"><HalftoneNebula preset="bullseye" params={SKY} interactive={false} maxDpr={1} maxFps={30} /><div className="nebula-shade" /></div>
     <div className="app-shell bench-shell" data-armed={!!bench?.armed}>
@@ -63,7 +69,7 @@ export default function RoverDemo() {
         <div className="bench-header-right"><span className="micro">REAL ROVER · SEARCH + DRIVE</span><Button className="stop-button" onClick={() => void stop()} aria-label="STOP rover"><Square size={12} fill="currentColor" /> STOP</Button></div>
       </header>
       <main className="bench-main">
-        <div className="bench-title"><div><p className="eyebrow">ROVER OPERATIONS / 01</p><h1>Find it. Bring it home<span>.</span></h1><p>Choose a color for automatic search, then pick up the material and bring it home.</p></div><span className={`bench-pill ${bench?.armed ? "ready" : ""}`}><CircleDot size={14} />{bench?.direction ? `${bench.direction.toUpperCase()} · ${bench.drive_mode === "hold" ? "KEYBOARD" : "STEP"}` : bench?.stop_pending ? "STOP REQUESTED" : bench?.armed ? "CONTROLS ENABLED" : "CONTROLS DISABLED"}</span></div>
+        <div className="bench-title"><div><p className="eyebrow">ROVER OPERATIONS / 01</p><h1>Find it. Bring it home<span>.</span></h1><p>Choose the ruby or the emerald. The rover finds it and stops 10 cm away; you drive up, grab it and bring it home.</p></div><span className={`bench-pill ${bench?.armed ? "ready" : ""}`}><CircleDot size={14} />{bench?.direction ? `${bench.direction.toUpperCase()} · ${bench.drive_mode === "hold" ? "KEYBOARD" : "STEP"}` : bench?.stop_pending ? "STOP REQUESTED" : bench?.armed ? "CONTROLS ENABLED" : "CONTROLS DISABLED"}</span></div>
         {error && <div className="bench-error" role="alert">{error}<Button variant="ghost" onClick={clearError}>Dismiss</Button></div>}
         <div className="bench-grid" ref={stage}>
           <div className="bench-left">
@@ -81,14 +87,19 @@ export default function RoverDemo() {
           <div className="bench-right">
             <section className="panel bench-pilot" aria-label="Pilot and bridge setup">
               <div className="panel-heading"><div className="heading-icon"><Radio size={16} /><h2>Pilot seat</h2></div><span className="micro">{isPilot ? "YOU HAVE CONTROL" : state?.pilot_id ? "VIEWER" : "AVAILABLE"}</span></div>
-              <div className="bench-panel-body">
+              {autoOn ? <div className="bench-panel-body">
+                <div className="bench-pilot-row"><div><strong>{isPilot ? "You’re the pilot" : state?.pilot_id ? "Another page has the controls" : "Taking the controls…"}</strong>
+                  <p>{bridgeReady ? bench?.armed ? "Rover connected. Controls are on." : "Rover connected. Controls come back on once stopped." : bench?.status === "connecting" ? "Connecting to the rover…" : "Rover not connected. Reconnecting automatically."}</p></div>
+                  <Button variant="outline" disabled={!connected || !isPilot || busy} onClick={() => void act("bridge_connect")}><Unplug size={16} />Reconnect now</Button></div>
+                <p className="bench-help">Join the ELEGOO Wi-Fi first. Close the phone app and CLI tests. Battery on, USB disconnected, shield switch on Cam. STOP halts the rover at any time.</p>
+                {bench?.error && !bridgeReady && <p className="bench-inline-error" role="status">{bench.error}</p>}
+              </div> : <div className="bench-panel-body">
                 <div className="bench-pilot-row"><div><strong>{isPilot ? "You’re the pilot" : state?.pilot_id ? "Another pilot is connected" : "Ready when you are"}</strong><p>One pilot. STOP is available to everyone.</p></div><Button variant="outline" disabled={!connected || (!isPilot && !!state?.pilot_id)} onClick={() => void act(isPilot ? "release" : "claim")}>{isPilot ? "Release" : "Claim controls"}</Button></div>
                 <Button className="bench-connect" variant="outline" disabled={!connected || !isPilot || busy || !!bench?.armed} onClick={() => void act("bridge_connect")}><Unplug size={16} />{bench?.busy && !bench.direction ? "Checking bridge…" : bridgeReady ? "Reconnect bridge" : "Connect rover bridge"}</Button>
                 <p className="bench-help">Join the ELEGOO Wi-Fi first. Close the phone app and CLI tests. Battery on, USB disconnected, shield switch on Cam.</p>
-                <Button className="primary-button bench-enable" aria-pressed={!!bench?.armed} disabled={!connected || !isPilot || (!bench?.armed && (!bridgeReady || busy || awaitingPickup))} onClick={() => bench?.armed ? void stop() : void act("bench_arm")}>{bench?.armed ? "Disable controls" : "Enable controls"}</Button>
-                {awaitingPickup && <p className="bench-help">Pick up the material and confirm below the camera before enabling movement.</p>}
+                <Button className="primary-button bench-enable" aria-pressed={!!bench?.armed} disabled={!connected || !isPilot || (!bench?.armed && (!bridgeReady || busy))} onClick={() => bench?.armed ? void stop() : void act("bench_arm")}>{bench?.armed ? "Disable controls" : "Enable controls"}</Button>
                 {bench?.error && <p className="bench-inline-error" role="status">{bench.error}</p>}
-              </div>
+              </div>}
             </section>
             <ScooperPanel scooper={bench?.scooper} canUse={connected && isPilot} onAction={(kind) => void act(kind)} />
             <section className="panel bench-controls" aria-label="Rover direction controls">
@@ -101,17 +112,17 @@ export default function RoverDemo() {
                   <Button className="bench-turn" disabled={!canStep} aria-label="Step right" onClick={() => step("right")}><ArrowRight /><span>Right</span></Button>
                   <Button className="bench-down" disabled={!canStep} aria-label="Step backward" onClick={() => step("backward")}><ArrowDown /><span>Reverse</span></Button>
                 </div>
-                <p className="bench-help bench-keyboard">Hold WASD or arrow keys to drive. Release to stop. Buttons run one timed step. Space stops and disables controls.</p>
+                <p className="bench-help bench-keyboard">Hold WASD or arrow keys to drive. Release to stop. Buttons run one timed step. Space stops.</p>
                 <label className="bench-speed" htmlFor="bench-speed">Base speed <strong>{speed}<small> / 255 PWM</small></strong></label>
                 <input id="bench-speed" className="bench-range" type="range" min={40} max={100} step={5} value={speed} disabled={busy} onChange={(event) => setSpeed(Number(event.target.value))} />
                 <label className="bench-duration" htmlFor="bench-duration">Button step duration<select id="bench-duration" value={duration} disabled={busy} onChange={(event) => setDuration(Number(event.target.value))}><option value={200}>0.2 seconds</option><option value={500}>0.5 seconds</option><option value={1000}>1 second</option></select></label>
-                <p className="bench-help">Manual driving has no automatic obstacle avoidance. Driving briefly pauses for distance updates. STOP and focus loss disable controls.</p>
+                <p className="bench-help">Manual driving has no automatic obstacle avoidance. Driving briefly pauses for distance updates. STOP and focus loss stop the rover.</p>
               </div>
             </section>
           </div>
         </div>
         <section className="panel bench-log"><div className="panel-heading"><div className="heading-icon"><Terminal size={16} /><h2>Activity log</h2></div><span className="micro">LATEST {state?.events.length || 0} EVENTS</span></div><div className="bench-log-body">{state?.events.slice(0, 12).map((event) => <div className={`bench-log-row ${event.level}`} key={event.id}><time>{new Date(event.at).toLocaleTimeString()}</time><p>{event.message}</p></div>) || <p>Waiting for the bench server. Launch mission-control/run-rover-demo.sh.</p>}</div></section>
-        <footer className="bench-footer">BULLSEYE / UB HACKING 2026<span>AUTOMATIC SEARCH · MANUAL PICKUP + RETURN</span></footer>
+        <footer className="bench-footer">BULLSEYE / UB HACKING 2026<span>AUTOMATIC SEARCH · MANUAL GRAB + RETURN</span></footer>
       </main>
     </div>
   </>;

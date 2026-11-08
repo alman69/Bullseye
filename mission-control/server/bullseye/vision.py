@@ -1,4 +1,4 @@
-"""Vision inside Mission Control: detection, floor check and a planner DRY RUN on the
+"""Vision inside Mission Control: detection and a floor check on the
 shared camera relay's frames, plus browser-driven calibration.
 
 The camera relay (camera.CameraHub) stays the ONLY connection to the ESP32 stream.
@@ -11,8 +11,8 @@ The processing code is the shared `bullseye_vision` package in software/vision, 
 also holds the arena calibration (config.json, color_model.json, captures/samples.npz),
 so the standalone test app and Mission Control use one calibration.
 
-The planner here is a DRY RUN: it reports the move it would make. Nothing in this
-module sends anything to the rover.
+Nothing in this module sends anything to the rover; the autopilot (autopilot.py)
+reads these results and decides every move.
 """
 from __future__ import annotations
 
@@ -44,8 +44,8 @@ TUNABLE = {
     "navigation.aim_deadband": (float, 0.02, 0.4),
     "navigation.arrive_distance_cm": (float, 2.0, 100.0),
     "navigation.approach_zone_y": (float, 0.0, 0.3),
-    "navigation.search_turn_ms": (int, 100, 1000),
-    "navigation.avoid_turn_ms": (int, 100, 1000),
+    "navigation.arrive_bottom_y": (float, 0.5, 1.0),
+    "navigation.wall_distance_cm": (float, 10.0, 60.0),
 }
 # Camera sensor settings sent to the ESP32's /control endpoint (runtime only, reset on power-off;
 # no firmware change). Under the floodlight: more saturation and less exposure keep colors visible.
@@ -75,7 +75,7 @@ class VisionService:
         self.dir = Path(settings.vision_dir)
         self.config_path = self.dir / "config.json"
         self.available, self.error = False, None
-        self.lock = threading.Lock()            # guards detector/planner/config between thread and commands
+        self.lock = threading.Lock()            # guards detector/floor check/config between thread and commands
         self.subscribers: set[asyncio.Queue] = set()
         self.task: asyncio.Task | None = None
         self.target = "red"
@@ -115,7 +115,7 @@ class VisionService:
         self.undo: list = []
 
     def _reload(self) -> None:
-        """Rebuild detector and planner after a calibration change (call with the lock held)."""
+        """Rebuild detector and floor check after a calibration change (call with the lock held)."""
         samples, undo = self.samples, self.undo
         self.v.config.save_config(self.cfg, self.config_path)
         self._load()
@@ -186,12 +186,12 @@ class VisionService:
             prepared = self.detector.prepare(image)
             det = self.detector.detect(image, self.target, seq, time.time(), prepared=prepared)
             frame = SimpleNamespace(image=image, received_at=time.monotonic())
-            action = self.nav.update(frame, det, self.detector, prepared=prepared)
+            self.nav.update(frame, det, self.detector, prepared=prepared)
             self._image, self._prepared, self._det = image, prepared, det
             if det.detected:
                 self.last_seen = {"seq": seq, "t": frame.received_at, "target": self.target, "err": float(det.horizontal_error)}
             self._processed_at = time.monotonic()
-            result = self._result(image, det, action, seq)
+            result = self._result(image, det, seq)
             now = time.monotonic()
             self._times.append(now)
             result["processing_ms"] = round((time.perf_counter() - t0) * 1000, 1)
@@ -200,7 +200,7 @@ class VisionService:
             self.latest = result
             return result
 
-    def _result(self, image, det, action, seq) -> dict:
+    def _result(self, image, det, seq) -> dict:
         h, w = image.shape[:2]
 
         def box(b):
@@ -211,7 +211,7 @@ class VisionService:
         stop = ground.get("stop_line_y")
         return {
             "type": "vision", "seq": seq, "w": w, "h": h, "target": self.target,
-            "mode": self.detector.mode, "dry_run": True,
+            "mode": self.detector.mode,
             "detection": det.to_dict(),
             "box": box(det.bbox) if det.detected else None,
             "center": [round(det.center_x / w, 4), round(det.center_y / h, 4)] if det.detected else None,
@@ -221,9 +221,6 @@ class VisionService:
                 "heights": [round(x, 3) for x in free.heights], "blocked": free.blocked,
                 "corridor": free.corridor, "roi_top": round(free.roi_top_px / h, 4),
                 "blocked_height": self.nav.floor.blocked_height, "floor_visible": free.floor_visible},
-            "nav": {"state": self.nav.planner.state,
-                    "action": action.to_dict() if action else None,
-                    "label": action.label() if action else None},
             "mask_boxes": self.detector.ignore_boxes,
             "mask_polygons": self.detector.ignore_polygons,
             "materials": self._materials(image),
@@ -352,11 +349,10 @@ class VisionService:
             return {"available": False, "error": self.error}
         latest = self.latest or {}
         det = latest.get("detection") or {}
-        nav = latest.get("nav") or {}
         ground = self.cfg["ground"]
         model = self.detector.model
         return {
-            "available": True, "error": self.error, "dry_run": True,
+            "available": True, "error": self.error,
             "target": self.target, "mode": self.detector.mode,
             "classes": list(model.classes) if model else [],
             "model_fitted": model is not None,
@@ -367,8 +363,6 @@ class VisionService:
             "materials": latest.get("materials", {}),
             "detected": bool(det.get("detected")), "direction": det.get("direction"),
             "horizontal_error": det.get("horizontal_error"), "distance_cm_est": det.get("distance_cm_est"),
-            "nav_state": nav.get("state"), "nav_label": nav.get("label"),
-            "nav_reason": (nav.get("action") or {}).get("reason"),
             "fps": latest.get("fps", 0.0), "processing_ms": latest.get("processing_ms"),
             "message": self.message,
             "sample_counts": {k: int(len(v)) for k, v in self.samples.items()},
@@ -419,10 +413,6 @@ class VisionService:
             raise CommandError("Choose a red or green sample, or home. Blue is an obstacle.")
         self.target = color
         self.nav.reset()
-
-    def _cmd_reset_planner(self, p):
-        self.nav.reset()
-        self.message = "Planner reset."
 
     def _cmd_sample(self, p):
         import cv2

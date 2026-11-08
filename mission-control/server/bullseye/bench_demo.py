@@ -4,7 +4,7 @@ from collections import deque
 import time
 from uuid import uuid4
 
-from .autopilot import Autopilot, AutopilotError
+from .autopilot import NAMES, Autopilot, AutopilotError
 from .elegoo_bench import DIRECTIONS, validate_pulse
 from .elegoo_probe import FrameParser
 from .mission import CommandError, utc_now
@@ -14,10 +14,11 @@ from .ble_companion import BleCompanionLink
 # Bench command kind -> scooper firmware command.
 SCOOPER_ACTIONS = {"scooper_squeeze": "squeeze", "scooper_release": "release", "scooper_home": "home"}
 SCOOPER_LABELS = {"squeeze": "Squeeze", "release": "Release", "home": "Straight down"}
+SEARCHING = {"running", "scanning", "relocating", "approaching"}
 
 
 class FactoryBridge:
-    """One TCP connection, one reader, atomic writes; never reconnect/replay motion."""
+    """One TCP connection, one reader, atomic writes. BenchControl may reconnect it, but motion is never replayed."""
 
     def __init__(self, host, port):
         self.host, self.port = host, port
@@ -267,8 +268,12 @@ class BenchControl:
         self.subscribers = set()
         self.stop_jobs = set()
         self.vision = None   # VisionService, attached by create_app when enabled
-        self.auto = {"state": "idle", "message": "Choose a sample color, then start the search.", "target": None, "run_id": None}
-        self.log("Rover control online. Connect the bridge, then enable controls.")
+        self.auto = {"state": "idle", "message": "Choose the ruby or the emerald, then start the search.", "target": None, "run_id": None}
+        self.auto_on = getattr(settings, "bench_auto_on", False)
+        self.reconnect_at = 0.0
+        self.reconnect_failures = 0
+        self.log("Rover control online. Connecting to the rover automatically." if self.auto_on
+                 else "Rover control online. Connect the bridge, then enable controls.")
 
     def log(self, message, level="info"):
         self.events.appendleft({"id": uuid4().hex, "at": utc_now(), "message": message, "level": level})
@@ -290,7 +295,7 @@ class BenchControl:
             "events": list(self.events),
             "vision": self.vision.summary() if self.vision else None,
             "bench": {"enabled": True, "status": self.bridge.status, "error": self.bridge.error,
-                      "armed": self.armed, "arm_token": self.arm_token, "busy": self.operation is not None,
+                      "armed": self.armed, "arm_token": self.arm_token, "auto_on": self.auto_on, "busy": self.operation is not None,
                       "direction": self.direction, "stop_pending": self.stop_pending,
                       "heartbeats": self.bridge.heartbeats, "max_duration_ms": 1000, "max_speed": 100,
                       "drive_mode": self.drive_mode, "hold_id": self.hold_id,
@@ -317,8 +322,8 @@ class BenchControl:
     def latch(self, reason, *, latched=True):
         if latched:
             self.armed, self.arm_token, self.stopped = False, None, True
-        if self.auto["state"] in {"running", "scanning", "relocating", "approaching", "arrived"}:
-            self._report("stopped", "Search stopped. Enable controls to start a new search.")
+        if self.auto["state"] in SEARCHING:
+            self._report("stopped", "Search stopped. Start a new search when ready.")
         self.hold_id, self.hold_until = None, 0
         if self.operation and self.operation is not asyncio.current_task():
             self.operation.cancel()
@@ -353,9 +358,10 @@ class BenchControl:
             job.add_done_callback(self.stop_jobs.discard)
         self.publish()
 
-    async def stop(self, reason="STOP requested. Enable controls to continue."):
+    async def stop(self, reason=None):
         async with self.lock:
-            self.latch(reason)
+            self.latch(reason or ("STOP requested. Controls come back on once the rover has stopped." if self.auto_on
+                                  else "STOP requested. Enable controls to continue."))
             return self.snapshot()  # Publish/latch before waiting on hardware.
 
     async def disconnect(self, session_id):
@@ -400,7 +406,7 @@ class BenchControl:
                 if self.pilot and self.pilot != session_id:
                     raise CommandError("Another pilot has the controls.")
                 if self.pilot != session_id:
-                    self.log("Pilot controls claimed. Movement remains disabled until explicitly enabled.")
+                    self.log("Pilot controls claimed." if self.auto_on else "Pilot controls claimed. Movement remains disabled until explicitly enabled.")
                 self.pilot, self.lease_until = session_id, time.monotonic() + 3
             else:
                 if self.pilot != session_id:
@@ -429,8 +435,6 @@ class BenchControl:
                         raise CommandError("Stop and wait for the current action before reconnecting.")
                     self.launch(self.bridge.connect)
                 elif kind == "bench_arm":
-                    if self.auto["state"] == "awaiting_pickup":
-                        raise CommandError("Pick up the material and confirm pickup before enabling movement.")
                     if not self.bridge.connected or self.operation or self.stop_pending:
                         raise CommandError("Connect the command bridge and wait for STOP acknowledgement first.")
                     self.armed, self.stopped, self.arm_token = True, False, uuid4().hex
@@ -467,23 +471,15 @@ class BenchControl:
                     name = SCOOPER_ACTIONS[kind]
                     self._scooper_job(self._scooper_command(name))
                     self.log(f"Scooper: {SCOOPER_LABELS[name]} requested.")
-                elif kind in {"auto_pickup_confirm", "auto_home_confirm"}:
-                    expected = "awaiting_pickup" if kind == "auto_pickup_confirm" else "manual_return"
-                    if self.auto["state"] != expected or not self.auto.get("run_id") or payload.get("run_id") != self.auto["run_id"]:
-                        raise CommandError("This mission confirmation is no longer current.")
+                elif kind == "auto_home_confirm":
+                    if self.auto["state"] != "manual_pickup" or not self.auto.get("run_id") or payload.get("run_id") != self.auto["run_id"]:
+                        raise CommandError("This delivery confirmation is no longer current.")
                     if self.operation or self.stop_pending:
                         raise CommandError("Wait for the rover to stop before confirming.")
-                    if kind == "auto_pickup_confirm":
-                        self._report("manual_return", "Pickup confirmed. Carry the material to home base, then confirm delivery. Enable controls only if you need to drive the rover manually.")
-                        self.log("Pilot confirmed manual pickup. Waiting for delivery to home base.", "success")
-                    else:
-                        self.armed, self.arm_token, self.stopped = False, None, True
-                        self.launch(self._confirm_home, "Pilot confirmed material delivered to home base.")
+                    self.launch(self._confirm_home, "Pilot confirmed the sample is at home base.")
                 elif kind == "auto_return":
-                    raise CommandError("Bring the material to home base manually, then confirm delivery.")
+                    raise CommandError("Drive the sample home manually, then press Delivered.")
                 elif kind in {"auto_goto", "auto_mission"}:
-                    if self.auto["state"] in {"awaiting_pickup", "manual_return"}:
-                        raise CommandError("Finish manual pickup and delivery before starting another search.")
                     if not self.armed or not self.bridge.connected or self.stopped:
                         raise CommandError("Connect and enable controls first.")
                     if self.operation or self.stop_pending:
@@ -494,9 +490,9 @@ class BenchControl:
                         raise CommandError("Vision is not running, so the autopilot can't see.")
                     avoid = True  # physical autonomous moves always use obstacle avoidance
                     color = payload.get("color")
-                    if color not in ("red", "green"):
-                        raise CommandError("Choose a red or green sample. Blue is an obstacle.")
-                    label = f"Search for {color}: scan 360°, relocate using ultrasonic clearance, approach to 10 cm, then wait for manual pickup"
+                    if color not in NAMES:
+                        raise CommandError("Choose the ruby or the emerald. Blue is an obstacle.")
+                    label = f"Search for the {NAMES[color]}: scan 360°, drive toward open space if needed, stop 10 cm away, then hand over for manual pickup"
                     job = lambda pilot: pilot.mission(color, avoid=avoid)
                     self.auto = {"state": "running", "message": label, "target": color, "run_id": uuid4().hex}
                     self.direction, self.drive_mode = "auto", "auto"
@@ -507,11 +503,8 @@ class BenchControl:
             self.publish()
 
     def _report(self, state, message):
-        if state == "awaiting_pickup":
-            # Arrival is already STOP-acknowledged. Require a human handoff before any rearm.
-            self.armed, self.arm_token, self.stopped = False, None, True
         self.auto = {**self.auto, "state": state, "message": message,
-                     "expression": "happy" if state in {"sample_reached", "awaiting_pickup", "manual_return"} else "auto"}
+                     "expression": "happy" if state == "manual_pickup" else "auto"}
         self.publish()
 
     async def _confirm_home(self):
@@ -522,7 +515,7 @@ class BenchControl:
         if setter is not None and await setter((255, 0, 0)) is not True:
             self.latch("Delivery indicator was not acknowledged. Reconnect the bridge and confirm again.")
             return False
-        self._report("home_arrived", "Material delivered to home base. Mission complete; rover controls disabled.")
+        self._report("home_arrived", "Sample delivered to home base. Mission complete; LEDs red.")
 
     async def _autopilot(self, job):
         pilot = Autopilot(self.bridge, self.vision, self._report)
@@ -577,6 +570,32 @@ class BenchControl:
                 self.log(f"Scooper refused {SCOOPER_LABELS[name]}: {result}", "warning")
         self.publish()
 
+    def _keep_on(self):
+        """Auto mode: reconnect a dropped bridge and turn the controls back on once stopped (call with the lock held)."""
+        if self.operation is not None or self.stop_pending:
+            return
+        if not self.bridge.connected:
+            if self.bridge.status != "connecting" and time.monotonic() >= self.reconnect_at:
+                self.reconnect_at = time.monotonic() + min(5.0, 1.0 + self.reconnect_failures)
+                self.launch(self._auto_connect)
+        elif not self.armed:
+            self.armed, self.stopped, self.arm_token = True, False, uuid4().hex
+            self.publish()
+
+    async def _auto_connect(self):
+        try:
+            await self.bridge.connect()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.reconnect_failures += 1
+            if self.reconnect_failures == 1:
+                self.log("Rover not reachable. Retrying automatically; check ELEGOO Wi-Fi, power and the Cam switch.", "warning")
+            return False
+        self.reconnect_failures = 0
+        self.log("Rover connected. Controls are on; STOP is always available.", "success")
+        return False   # already logged
+
     async def _hold(self, hold_id):
         def current():
             return self.armed and self.hold_id == hold_id and time.monotonic() < self.hold_until
@@ -611,9 +630,11 @@ class BenchControl:
                         self.pilot = None
                         self.latch("Pilot heartbeat expired. STOP requested.")
                     elif self.armed and not self.bridge.connected:
-                        self.latch("Command connection lost. Reconnect explicitly; controls disabled.")
+                        self.latch("Command connection lost. STOP requested." + (" Reconnecting automatically." if self.auto_on else " Reconnect explicitly; controls disabled."))
                     elif self.hold_id and time.monotonic() > self.hold_until:
                         self.latch("Keyboard input expired. STOP requested; controls disabled.")
+                    elif self.auto_on:
+                        self._keep_on()
                     if time.monotonic() >= next_publish:
                         self.publish()
                         next_publish = time.monotonic() + .1

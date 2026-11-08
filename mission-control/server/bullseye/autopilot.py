@@ -1,360 +1,360 @@
-"""Scan all bearings, relocate to nearby clear space, and approach a selected color.
+"""Simple autonomy: find the selected color, stop about 10 cm in front of it, hand over.
 
-Timed motion needs arena calibration: there are no encoders or a global map.
-Sample missions finish stopped for manual pickup and a manual trip home.
+    1. One 360° scan: turn right in measured steps, checking the camera after each one and
+       recording an ultrasonic reading for every heading. This is the only full turn.
+    2. Color seen -> approach: turn to center it, step forward, stop about 10 cm away.
+    3. Not seen -> face the heading with the most ultrasonic room and explore: drive forward
+       (camera and sonar checked between steps) until a wall is near. A close wall means the
+       sample is probably not that way, so check left and right with the sonar (camera still
+       watching while turning), face the more open side and keep driving. Never another 360.
+    4. Lost the sample during an approach -> look toward the side it was last seen, then
+       keep exploring.
+    5. On arrival autonomy ends: the pilot drives up, squeezes the gripper and brings the
+       sample home manually.
+
+Every move is one bounded timed pulse (STOP before and after) followed by fresh camera
+frames. There are no encoders or map; distances come from the measured step table.
 """
 import asyncio
-import copy
 import math
-import statistics
 import time
 
 RED, GREEN = (255, 0, 0), (0, 255, 0)
-MOVE_TO_DIRECTION = {"turn_left": "left", "turn_right": "right", "forward": "forward", "backward": "backward"}
-TURN_DIRECTION = "left"
-SONAR_CLEARANCE_CM = 1.0  # integer sonar reports: stop one centimetre early
-SAMPLE_DISTANCE_CM = 10.0
-RELOCATE_MAX_CM = 15.0
+NAMES = {"red": "ruby", "green": "emerald"}   # what the operator sees
+
+STOP_CM = 10.0          # final gap in front of the sample
+SONAR_MARGIN_CM = 1.0   # the sonar reports whole centimetres: stop one centimetre early, never short of 10
+FAR_STEP_CM = 15.0      # longest forward step when there is lots of room (one 1 s pulse)
+NEAR_STEP_CM = 7.5      # forward step once the sample is within FAR_GAP_CM or low in the image
+FINAL_STEP_CM = 2.7     # forward step when the sample is almost at the bottom of the image
+FAR_GAP_CM = 35.0       # approach gaps above this use FAR_STEP_CM
+SCAN_STEP_MAX_DEG = 40  # scan turn size, capped so camera views still overlap
+SCAN_OVERLAP = 0.75     # scan step = this share of the camera's horizontal view
+SIDE_DEG = 90           # at a wall, check this far to the left and to the right
+OPEN_ENOUGH_CM = 100    # a side this open is taken without checking the other side
+LOST_PEEK_DEG = 60      # after losing the sample, look this far toward where it was last seen
+DEAD_ENDS_MAX = 3       # wall checks in a row with no forward progress = boxed in
+ARRIVE_BOTTOM_Y = 0.85  # sample's bottom edge this low in the image = right in front of the rover
+SEARCH_LIMIT_S = 600    # safety net only: the search otherwise continues until STOP
 
 
 class AutopilotError(RuntimeError):
-    """The run could not finish (target lost, no camera, too many steps). Not a hardware fault."""
+    """The run could not finish (no camera, no sonar, blocked path). Not a hardware fault."""
+
+
+def _table(raw) -> list:
+    """{"200": 2.7, ...} -> [(0, 0.0), (200, 2.7), ...] sorted, positive values only."""
+    rows = []
+    for ms, value in (raw or {}).items():
+        try:
+            ms, value = int(ms), float(value)
+        except (TypeError, ValueError):
+            continue
+        if 50 <= ms <= 1000 and math.isfinite(value) and value > 0:
+            rows.append((ms, value))
+    return [(0, 0.0)] + sorted(rows)
+
+
+def _interp(table, x, src, dst):
+    """Piecewise-linear lookup in `table` from column `src` to column `dst`, extrapolating the last segment."""
+    for a, b in zip(table, table[1:]):
+        if x <= b[src]:
+            return a[dst] + (b[dst] - a[dst]) * (x - a[src]) / (b[src] - a[src])
+    a, b = table[-2], table[-1]
+    return b[dst] + (b[dst] - a[dst]) * (x - b[src]) / (b[src] - a[src])
+
+
+def _wrap(deg):
+    return (deg + 180) % 360 - 180
 
 
 class Autopilot:
     def __init__(self, bridge, vision, report=lambda state, message: None):
         self.bridge, self.vision, self.report = bridge, vision, report
+        nav = getattr(vision, "cfg", {}).get("navigation", {})
+        steps = nav.get("steps", {})
+        self.turn_table = _table(steps.get("turn"))
+        self.forward_table = _table(steps.get("forward"))
+        self.turn_pwm = int(nav.get("turn_pwm", 60))
+        self.drive_pwm = int(nav.get("drive_pwm", 60))
+        self.deadband = float(nav.get("aim_deadband", 0.12))
+        self.hfov = float(nav.get("camera_hfov_deg") or nav.get("glimpse_hfov_deg") or 50)
+        self.wall_cm = float(nav.get("wall_distance_cm", 25))
+        self.arrive_bottom_y = float(nav.get("arrive_bottom_y", ARRIVE_BOTTOM_Y))
+        self.deadline = math.inf
+        self.first_side = "left"           # alternate which side is checked first at walls
+        self.obstacles = None              # blue-obstacle check from the latest looked-at frame
 
-    # ------------------------------------------------------------ helpers
-    def _planner(self, color: str = ""):
-        pipeline = self.vision.v.pipeline
-        cfg = self.vision.cfg
-        settings = pipeline.NavSettings.from_dict(cfg["navigation"])
-        settings.explore_timeout_s = max(30, min(300, settings.explore_timeout_s or 120))
-        # Physical arrival always needs sonar; image size/stop-line disappearance is not arrival.
-        settings.arrive_area_ratio = 2.0
-        return pipeline.Planner(settings, use_distance=False, stop_line_y=None)
+    # ------------------------------------------------------------ step table
+    def turn_deg(self, ms):
+        return _interp(self.turn_table, ms, 0, 1)
 
-    def _stop_cm(self, color: str, planner) -> float:
-        nav = self.vision.cfg["navigation"]
-        return float(nav.get("base_distance_cm", 15)) if color == "home" else SAMPLE_DISTANCE_CM
+    def turn_ms(self, deg):
+        return _interp(self.turn_table, deg, 1, 0)
 
-    async def _led(self, rgb) -> None:
+    def forward_cm(self, ms):
+        return _interp(self.forward_table, ms, 0, 1)
+
+    def forward_ms(self, cm):
+        return _interp(self.forward_table, cm, 1, 0)
+
+    def _check_tables(self):
+        if len(self.turn_table) < 2 or len(self.forward_table) < 2:
+            raise AutopilotError("Measure the turn and forward steps first (Calibration → Steps).")
+
+    def _scan_step_ms(self):
+        deg = min(SCAN_STEP_MAX_DEG, self.hfov * SCAN_OVERLAP)
+        return max(50, min(1000, round(self.turn_ms(deg))))
+
+    # ------------------------------------------------------------ moves and sensors
+    async def _move(self, direction, ms, pwm):
+        if time.monotonic() > self.deadline:
+            raise AutopilotError("Search safety limit reached. Stopped; start a new search when ready.")
+        await self.bridge.pulse(direction, max(1, min(100, pwm)), max(50, min(1000, int(round(ms)))))
+
+    async def _turn(self, degrees):
+        """Blind turn by `degrees` (+ = right) in pulses of at most one second."""
+        direction = "right" if degrees > 0 else "left"
+        remaining = abs(degrees)
+        while remaining > max(1.0, self.turn_deg(50) / 2):
+            ms = max(50, min(1000, self.turn_ms(remaining)))
+            await self._move(direction, ms, self.turn_pwm)
+            remaining -= self.turn_deg(ms)
+
+    async def _forward(self, cm):
+        """One forward pulse of about `cm` (at most one second). Returns the distance driven, 0 if too short."""
+        ms = min(1000, self.forward_ms(cm))
+        if ms < 50:
+            return 0.0
+        await self._move("forward", ms, self.drive_pwm)
+        return self.forward_cm(ms)
+
+    async def _sonar(self, retries=1):
+        """Fresh ultrasonic distance in cm, or None (no echo is unknown, never open space)."""
+        refresh = getattr(self.bridge, "refresh_distance", None)
+        for _ in range(1 + retries):
+            if refresh is not None and await refresh():
+                d = self.bridge.distance_cm
+                if not isinstance(d, bool) and isinstance(d, (int, float)) and math.isfinite(d) and d > 0:
+                    return float(d)
+        return None
+
+    async def _led(self, rgb):
         setter = getattr(self.bridge, "set_led", None)
-        if setter is not None:
-            if await setter(rgb) is not True:
-                raise AutopilotError("LED/STOP command was not acknowledged. Motion halted.")
+        if setter is not None and await setter(rgb) is not True:
+            raise AutopilotError("LED/STOP command was not acknowledged. Motion halted.")
 
-    def _seq(self) -> int:
+    # ------------------------------------------------------------ camera
+    def _seq(self):
         latest = self.vision.latest
         return latest["seq"] if latest else -1
 
-    async def _fresh_view(self, after_seq: int, timeout: float = 3.0):
-        """Detection + floor result from a frame captured after the last move ended."""
+    async def _frame(self, timeout=3.0):
+        """Detection and blue-obstacle check from a frame captured after the last move ended."""
+        after = self._seq()
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if self._seq() >= after_seq + 2:          # +2: skip a frame that may have been mid-capture
+            if self._seq() >= after + 2:        # skip a frame that may have been mid-capture
                 with self.vision.lock:
-                    nav = self.vision.nav
-                    return self.vision._det, nav.free, getattr(nav, "free_obstacles", None)
+                    return self.vision._det, getattr(self.vision.nav, "free_obstacles", None)
             await asyncio.sleep(0.02)
         raise AutopilotError("No fresh camera frame. Check the camera and Wi-Fi.")
 
-    async def _settled_target(self, view):
-        """Observe three distinct frames while stopped before trusting a target bearing."""
-        errors = [view[0].horizontal_error]
-        for _ in range(2):
-            seq = self._seq()
-            await asyncio.sleep(0.08)
-            view = await self._fresh_view(seq)
-            det = view[0]
-            if det is None or not det.detected:
-                return None
-            errors.append(det.horizontal_error)
-        if max(errors) - min(errors) > 0.18:
-            return None  # competing/flickering blobs: hold instead of chasing either
-        det = copy.copy(view[0])
-        det.horizontal_error = statistics.median(errors)
-        return det, view[1], view[2]
-
-    def _alignment_ms(self, planner, error, previous=None):
-        hfov = planner.s.camera_hfov_deg or self.vision.cfg['navigation'].get('glimpse_hfov_deg', 50)
-        degrees = abs(error) * hfov / 2
-        # Approach the bearing conservatively, then measure again after stopping.
-        duration = max(50, min(350, round(self._turn_ms(planner, degrees) * 0.75)))
-        if previous and previous[0] * error < 0:
-            duration = max(50, min(duration, previous[1] // 2))
-        return duration
-
-    async def _step(self, move: str, pwm: int, duration_ms: int):
-        direction = MOVE_TO_DIRECTION[move]
-        await self.bridge.pulse(direction, max(1, min(100, int(pwm))), max(50, min(1000, int(duration_ms))))
+    async def _look(self, color, confirm=True):
+        """(the target's Detection or None, obstacle check). With `confirm` a sighting must repeat in the next frame."""
+        det, obstacles = await self._frame()
+        seen = det is not None and det.detected and det.target_color == color
+        if seen and confirm:
+            again, obstacles = await self._frame()
+            seen = again is not None and again.detected and again.target_color == color
+            det = again if seen else det
+        self.obstacles = obstacles
+        return (det if seen else None), obstacles
 
     @staticmethod
-    def _table(planner) -> list:
-        return [(0, 0.0)] + list(planner.turn_table)
+    def _blocked(obstacles):
+        """Only blue obstacles block in the camera; walls are the sonar's job."""
+        return obstacles is not None and obstacles.center_blocked
 
-    def _turn_deg(self, planner, ms: float) -> float:
-        """Degrees turned by a timed turn of `ms`, interpolated from the measured step table."""
-        table = self._table(planner)
-        if len(table) < 2:
-            return ms * 0.049                       # ~49 degrees per second (measured at PWM 60)
-        for (m0, d0), (m1, d1) in zip(table, table[1:]):
-            if ms <= m1:
-                return d0 + (d1 - d0) * (ms - m0) / (m1 - m0)
-        (m0, d0), (m1, d1) = table[-2], table[-1]
-        return d1 + (d1 - d0) * (ms - m1) / (m1 - m0)
-
-    def _turn_ms(self, planner, deg: float) -> float:
-        """Timed turn (ms) for `deg` degrees: the inverse of _turn_deg (capped by the caller)."""
-        table = self._table(planner)
-        if len(table) < 2:
-            return deg / 0.049
-        for (m0, d0), (m1, d1) in zip(table, table[1:]):
-            if deg <= d1:
-                return m0 + (m1 - m0) * (deg - d0) / (d1 - d0)
-        return table[-1][0]
-
-    def _glimpse(self, color: str, after_seq: int, move, planner):
-        """Bearing (degrees, + = right of the current heading) of a sighting newer than `after_seq`."""
-        seen = self.vision.last_seen
-        if not seen or seen["target"] != color or seen["seq"] <= after_seq:
-            return None
-        nav = self.vision.cfg["navigation"]
-        hfov = planner.s.camera_hfov_deg or nav.get("glimpse_hfov_deg", 50)
-        bearing = seen["err"] * hfov / 2.0           # relative to the heading when the frame was taken
-        if move and move["kind"] in ("turn_left", "turn_right"):
-            captured = seen["t"] - nav.get("camera_latency_s", 0.15)
-            span = max(1e-3, move["end"] - move["start"])
-            share_after = min(1.0, max(0.0, (move["end"] - captured) / span))
-            turned = share_after * self._turn_deg(planner, move["ms"])
-            bearing += -turned if move["kind"] == "turn_right" else turned
-        return bearing
-
-    async def _ultrasonic_arrival(self, color: str, planner, action):
-        """Before a forward step toward the centered target: arrive at the stop distance, never overshoot it."""
-        distance = await self._wall_distance()
-        if distance is None:
-            raise AutopilotError("Target approach needs a valid ultrasonic reading. Stopped; check the sensor.")
-        stop_cm = self._stop_cm(color, planner)
-        room = distance - stop_cm - SONAR_CLEARANCE_CM
-        if room <= 0:
-            planner._enter("ARRIVED")
-            return planner._action("arrived", f"Target centered, ultrasonic {distance:.0f} cm (stop at {stop_cm:.0f} cm).")
-        ms = self._fitting_forward_ms(planner, room)
-        if action.duration_ms > ms:
-            return planner._move("forward", ms, f"Ultrasonic {distance:.0f} cm: shortened step to stop at {stop_cm:.0f} cm.")
-        return action
-
-    @staticmethod
-    def _fitting_forward_ms(planner, room):
-        table = sorted((ms, cm) for ms, cm in planner.forward_table if ms >= 50 and cm > 0)
-        if not table:
-            raise AutopilotError("Measure forward steps before autonomous approach.")
-        fitting = [ms for ms, cm in table if cm <= room]
-        if fitting:
-            return max(fitting)
-        ms, cm = table[0]
-        duration = int(ms * room / cm)
-        if duration < 50:
-            raise AutopilotError("Stopped short of the target: remaining distance is smaller than a safe timed step. Adjust manually; arrival is not confirmed.")
-        return duration
+    async def _swing(self, color, degrees):
+        """Turn by `degrees` (+ = right) in scan-sized steps, looking after each. Returns a sighting or None."""
+        step = self._scan_step_ms()
+        direction = "right" if degrees > 0 else "left"
+        remaining = abs(degrees)
+        while remaining > max(1.0, self.turn_deg(50) / 2):
+            ms = max(50, min(step, round(self.turn_ms(remaining))))
+            await self._move(direction, ms, self.turn_pwm)
+            remaining -= self.turn_deg(ms)
+            det, _ = await self._look(color)
+            if det is not None:
+                return det
+        return None
 
     # ------------------------------------------------------------ behaviors
-    async def _wall_distance(self):
-        """Fresh positive finite ultrasonic reading; no echo is never open space."""
-        refresh = getattr(self.bridge, "refresh_distance", None)
-        if refresh is None or not await refresh():
-            return None
-        distance = self.bridge.distance_cm
-        if isinstance(distance, bool) or not isinstance(distance, (int, float)):
-            return None
-        return float(distance) if math.isfinite(distance) and distance > 0 else None
+    async def scan(self, color):
+        """The one 360°. Returns (detection or None, [(heading_deg, sonar_cm), ...], heading turned)."""
+        step_ms = self._scan_step_ms()
+        step_deg = self.turn_deg(step_ms)
+        readings, heading = [], 0.0
+        while heading < 360:
+            self.report("scanning", f"Scanning for the {NAMES[color]}: {min(360, round(heading))}/360°.")
+            det, _ = await self._look(color)
+            if det is not None:
+                return det, readings, heading
+            readings.append((heading, await self._sonar(retries=0)))
+            await self._move("right", step_ms, self.turn_pwm)
+            heading += step_deg
+        return None, readings, heading
 
-    def _scan_step_ms(self, planner):
-        """Overlap camera views and count measured degrees, rather than a fixed turn count."""
-        table = planner.turn_table
-        if (not table or any(not 50 <= ms <= 1000 or not math.isfinite(deg) for ms, deg in table)
-                or any(b[1] <= a[1] for a, b in zip(table, table[1:]))):
-            raise AutopilotError("Measure increasing turn steps from 50–1000 ms before a 360° scan.")
-        hfov = planner.s.camera_hfov_deg or self.vision.cfg["navigation"].get("glimpse_hfov_deg", 50)
-        # Keep the view overlap even with the largest configured search pulse.
-        degrees = min(30.0, max(5.0, float(hfov) * 0.6))
-        ms = max(50, min(1000, planner.s.search_turn_ms, round(self._turn_ms(planner, degrees))))
-        if self._turn_deg(planner, ms) > degrees + 1:
-            raise AutopilotError("The shortest turn is too large for overlapping camera views. Recalibrate turn steps.")
-        return ms
+    def open_heading(self, readings):
+        """Heading with the most ultrasonic room."""
+        valid = [r for r in readings if r[1] is not None]
+        if not valid:
+            raise AutopilotError("The ultrasonic sensor gave no readings during the scan. Stopped; check the sensor.")
+        best = max(valid, key=lambda r: r[1])
+        if best[1] <= self.wall_cm:
+            raise AutopilotError("No open space in any direction. Reposition the rover, then search again.")
+        return best
 
-    @staticmethod
-    def _heading_delta(target, heading):
-        return (target - heading + 180) % 360 - 180
+    async def explore(self, color):
+        """Drive toward open space until a wall is near. Returns (sighting or None, cm driven)."""
+        driven = 0.0
+        name = NAMES[color]
+        while True:
+            det, obstacles = await self._look(color)
+            if det is not None:
+                return det, driven
+            distance = await self._sonar()
+            if distance is None or self._blocked(obstacles):
+                return None, driven
+            room = distance - self.wall_cm
+            moved = await self._forward(min(room, FAR_STEP_CM)) if room > 0 else 0.0
+            if not moved:
+                return None, driven             # wall close: the sample is probably not this way
+            driven += moved
+            self.report("relocating", f"No {name} in sight. Ultrasonic {distance:.0f} cm; driving toward open space.")
 
-    def _open_heading(self, samples, heading, planner):
-        """Pick a nearby reachable waypoint, with the least heading change.
+    async def pick_open_side(self, color):
+        """At a wall: check both sides with the sonar (camera watching), face the more open one.
 
-        A single front sonar cannot map a globally nearest region. Every sampled ray
-        offers a waypoint at most 15 cm away, provided wall clearance and visible floor
-        permit a safe pulse. Prefer the closest bearing, then the greater clearance.
+        Returns (sighting or None, room cm of the chosen side). A side that is very open is
+        taken without checking the other; if both are walls the rover turns around.
         """
-        valid = [(bearing, distance) for bearing, distance, floor_ok in samples
-                 if distance is not None and floor_ok
-                 and distance > planner.s.wall_distance_cm + SONAR_CLEARANCE_CM]
-        reachable = []
-        for bearing, distance in valid:
-            try:
-                self._fitting_forward_ms(planner, min(RELOCATE_MAX_CM,
-                    distance - planner.s.wall_distance_cm - SONAR_CLEARANCE_CM))
-            except AutopilotError:
+        first = self.first_side
+        self.first_side = "right" if first == "left" else "left"
+        sign = 1 if first == "right" else -1
+        self.report("relocating", f"Wall ahead. Checking {first} and the other side for open space.")
+        det = await self._swing(color, sign * SIDE_DEG)
+        if det is not None:
+            return det, None
+        first_cm = await self._sonar() or 0.0
+        if first_cm >= OPEN_ENOUGH_CM:
+            return None, first_cm
+        det = await self._swing(color, -sign * 2 * SIDE_DEG)
+        if det is not None:
+            return det, None
+        second_cm = await self._sonar() or 0.0
+        if max(first_cm, second_cm) <= self.wall_cm:
+            await self._turn(-sign * SIDE_DEG)  # both sides walled: face back the way we came
+            return None, 0.0
+        if first_cm > second_cm:
+            await self._turn(sign * 2 * SIDE_DEG)
+            return None, first_cm
+        return None, second_cm
+
+    async def reacquire(self, color, last):
+        """The sample dropped out of view mid-approach: look toward the side it was last seen."""
+        side = 1 if (last.horizontal_error or 0) >= 0 else -1
+        self.report("scanning", f"Lost the {NAMES[color]}. Looking where it was last seen.")
+        det = await self._swing(color, side * LOST_PEEK_DEG)
+        if det is None:
+            det = await self._swing(color, -side * 2 * LOST_PEEK_DEG)
+        return det
+
+    def _step_for(self, det, gap):
+        """Forward step size: long when far and high in the image, short as the sample gets close."""
+        low = det.bottom_y is not None and det.bottom_y >= self.arrive_bottom_y - 0.15
+        high = det.bottom_y is None or det.bottom_y < self.arrive_bottom_y - 0.25
+        step = FINAL_STEP_CM if low else FAR_STEP_CM if high and (gap is None or gap > FAR_GAP_CM) else NEAR_STEP_CM
+        if gap is not None:
+            step = min(step, gap - STOP_CM - SONAR_MARGIN_CM)
+        return step
+
+    async def approach(self, color, det):
+        """Center the target and step forward until about 10 cm away. Returns (arrived, last detection)."""
+        name = NAMES[color]
+        misses, last = 0, det
+        while True:
+            if det is None:
+                misses += 1
+                if (misses >= 2 and last.bottom_y is not None and last.bottom_y >= self.arrive_bottom_y - 0.1
+                        and abs(last.horizontal_error) <= self.deadband * 2):
+                    return True, last           # it slid under the camera, right in front of the gripper
+                if misses >= 3:
+                    return False, last
+                det, _ = await self._look(color, confirm=False)
                 continue
-            reachable.append((bearing, distance))
-        if not reachable:
-            if not any(distance is not None for _, distance, _ in samples):
-                raise AutopilotError("Search needs a valid wall-distance reading. Stopped; check the ultrasonic sensor.")
-            raise AutopilotError("Full scan complete; no reachable clear opening. Reposition the rover, then search again.")
-        return min(reachable, key=lambda item: (abs(self._heading_delta(item[0], heading)), -item[1]))[0]
-
-    async def go_to(self, color: str, avoid: bool = True, max_steps: int | None = None) -> bool:
-        """Scan → short sonar-checked relocation → repeat; approach a stable color by sonar."""
-        color = "home" if color == "black" else color
-        self.vision.set_target(color)
-        planner = self._planner(color)
-        scan_ms = self._scan_step_ms(planner)
-        scan_degrees = self._turn_deg(planner, scan_ms)
-        seq = self._seq()
-        phase, heading, swept = "scanning", 0.0, 0.0
-        samples, selected_heading = [], None
-        previous_aim = None
-        steps = arrivals = 0
-        deadline = time.monotonic() + planner.s.explore_timeout_s
-        while max_steps is None or steps < max_steps:
-            if time.monotonic() >= deadline:
-                raise AutopilotError("Search time limit reached. Stopped; reposition or start a new run.")
-            steps += 1
-            view = await self._fresh_view(seq)
-            detected = view[0] is not None and view[0].detected
-            if detected:
-                self.report("approaching", f"{color.title()} seen. Holding still to confirm alignment.")
-                settled = await self._settled_target(view)
-                if settled is not None:
-                    view = settled
-                else:
-                    # A flickering blob must not pin the rover in place forever.
-                    detected = False
-            det, free, free_obstacles = view
-            if detected:
-                phase = "approaching"
-                swept, samples, selected_heading = 0.0, [], None
-                planner._enter("APPROACH")
-                error = det.horizontal_error
-                if abs(error) > planner.s.aim_deadband:
-                    arrivals = 0
-                    ms = self._alignment_ms(planner, error, previous_aim)
-                    previous_aim = (error, ms)
-                    self.report("approaching", f"{color.title()} found. Aligning before approaching to 10 cm.")
-                    await self._step("turn_left" if error < 0 else "turn_right", planner.s.turn_pwm, ms)
-                else:
-                    previous_aim = None
-                    path = free_obstacles if color == "home" and free_obstacles is not None else free
-                    if avoid and path is not None and path.center_blocked and not planner._clear_to_target(det, path):
-                        raise AutopilotError("Target found, but the path is blocked. Stopped; reposition and search again.")
-                    action = await self._ultrasonic_arrival(color, planner,
-                        planner._move("forward", min(1000, max(50, planner.s.forward_ms)), "Approaching the selected color."))
-                    self.report("approaching", f"{color.title()} found. {action.reason}")
-                    if action.kind == "arrived":
-                        if await self.bridge.stop() is not True:
-                            raise AutopilotError("Arrival STOP was not acknowledged.")
-                        arrivals += 1
-                        if arrivals >= 3:
-                            self.report("arrived", f"Stopped at {color}. {action.reason}")
-                            return True
-                    else:
-                        arrivals = 0
-                        await self._step("forward", action.pwm, action.duration_ms)
-                seq = self._seq()
-                continue
-
-            arrivals, previous_aim = 0, None
-            if phase == "approaching":
-                self.report("scanning", f"Lost {color}. Starting a new 360° scan while stopped between turns.")
-                phase, heading, swept, samples = "scanning", 0.0, 0.0, []
-            floor_ok = free is not None and free.floor_visible and not free.center_blocked
-            if phase == "scanning":
-                distance = await self._wall_distance()
-                samples.append((heading % 360, distance, floor_ok))
-                if swept < 360:
-                    self.report("scanning", f"Searching for {color}: 360° scan {min(360, round(swept))}/360°. Checking every direction.")
-                    await self._step("turn_right", planner.s.turn_pwm, scan_ms)
-                    heading += scan_degrees
-                    swept += scan_degrees
-                    seq = self._seq()
-                    continue
-                selected_heading = self._open_heading(samples, heading, planner)
-                phase = "relocating"
-                self.report("relocating", f"Full 360° scan complete; {color} not found. Moving toward a nearby sonar-clear opening.")
-
-            delta = self._heading_delta(selected_heading, heading)
-            if abs(delta) > max(1.0, self._turn_deg(planner, 50) / 2):
-                ms = max(50, min(scan_ms, round(self._turn_ms(planner, abs(delta)))))
-                direction = "turn_right" if delta > 0 else "turn_left"
-                self.report("relocating", "Turning toward the nearest clear bearing. Rechecking space before driving.")
-                await self._step(direction, planner.s.turn_pwm, ms)
-                heading += self._turn_deg(planner, ms) * (1 if delta > 0 else -1)
+            misses, last = 0, det
+            error = det.horizontal_error
+            if abs(error) > self.deadband:
+                degrees = abs(error) * self.hfov / 2 * 0.8   # undershoot, then look again
+                self.report("approaching", f"{name.title()} found. Turning to center it.")
+                await self._move("right" if error > 0 else "left", max(50, min(400, self.turn_ms(degrees))), self.turn_pwm)
             else:
-                # Survey readings can be stale after turning. Never drive on the stored reading.
-                distance = await self._wall_distance()
-                if distance is None:
-                    raise AutopilotError("Relocation needs a valid wall-distance reading. Stopped; check the ultrasonic sensor.")
-                room = distance - planner.s.wall_distance_cm - SONAR_CLEARANCE_CM
-                if not floor_ok or room <= 0:
-                    self.report("scanning", "Opening is no longer clear. Holding position and scanning again.")
-                else:
-                    ms = self._fitting_forward_ms(planner, min(RELOCATE_MAX_CM, room))
-                    self.report("relocating", f"{color.title()} not found. Ultrasonic {distance:.0f} cm; taking one short step into clear space, then scanning again.")
-                    await self._step("forward", planner.s.drive_pwm, min(1000, ms))
-                phase, heading, swept, samples, selected_heading = "scanning", 0.0, 0.0, [], None
-            seq = self._seq()
-        raise AutopilotError(f"Test step limit reached without reaching {color}.")
+                gap = await self._gap(det)
+                if gap is not None and gap - SONAR_MARGIN_CM <= STOP_CM:
+                    return True, det
+                if self._blocked(self.obstacles):
+                    raise AutopilotError(f"An obstacle is between the rover and the {name}. Stopped; drive around it manually.")
+                where = "distance unknown" if gap is None else f"about {gap:.0f} cm away"
+                self.report("approaching", f"{name.title()} centered, {where}. Driving closer.")
+                if not await self._forward(self._step_for(det, gap)):
+                    return True, det            # closer than the smallest safe step
+            det, _ = await self._look(color, confirm=False)
 
-    def turn_plan(self, degrees: float = 180.0) -> list:
-        """Timed turn steps (ms) that add up to about `degrees`, from the measured step table."""
-        steps = self.vision.cfg["navigation"].get("steps", {}).get("turn", {})
-        table = sorted(((int(ms), float(deg)) for ms, deg in steps.items() if deg and float(deg) > 0), reverse=True)
-        if not table:
-            raise AutopilotError("Measure the turn steps first (Calibration → Steps).")
-        plan, remaining = [], float(degrees)
-        for ms, deg in table:
-            while remaining >= deg * 0.75:
-                plan.append(ms)
-                remaining -= deg
-        return plan
+    async def _gap(self, det):
+        """Closest of the sonar reading and the camera's ground estimate; STOP_CM once the sample is at the bottom."""
+        if det.bottom_y is not None and det.bottom_y >= self.arrive_bottom_y:
+            return STOP_CM
+        readings = [d for d in (await self._sonar(retries=0), det.distance_cm_est) if d is not None and d > 0]
+        return min(readings) if readings else None
 
-    async def turn_around(self, degrees: float = 180.0) -> None:
-        plan = self.turn_plan(degrees)
-        for i, ms in enumerate(plan, 1):
-            self.report("running", f"Turning around: step {i}/{len(plan)} ({ms} ms)")
-            await self._step(f"turn_{TURN_DIRECTION}", self.vision.cfg["navigation"].get("turn_pwm", 60), ms)
+    async def find(self, color):
+        """One 360° scan, then explore by sonar until the color is found; stop about 10 cm in front of it."""
+        self._check_tables()
+        self.vision.set_target(color)
+        self.deadline = time.monotonic() + SEARCH_LIMIT_S
+        name = NAMES[color]
+        det, readings, heading = await self.scan(color)
+        if det is None:
+            bearing, distance = self.open_heading(readings)
+            self.report("relocating", f"Full scan done; no {name} in sight. Heading for the most open space ({distance:.0f} cm).")
+            await self._turn(_wrap(bearing - heading))
+        dead_ends = 0
+        while True:
+            if det is not None:
+                arrived, last = await self.approach(color, det)
+                if arrived:
+                    if await self.bridge.stop() is not True:
+                        raise AutopilotError("Arrival STOP was not acknowledged.")
+                    return True
+                det = await self.reacquire(color, last)
+                continue
+            det, driven = await self.explore(color)
+            if det is not None:
+                continue
+            dead_ends = 0 if driven > 0 else dead_ends + 1
+            if dead_ends >= DEAD_ENDS_MAX:
+                raise AutopilotError("Walls on every side. Stopped; reposition the rover, then search again.")
+            det, _ = await self.pick_open_side(color)
 
-    async def collect(self, color: str, avoid: bool = True) -> bool:
-        """Stop at the ore and signal sample success without actuating a gripper."""
-        if color not in ("red", "green"):
-            raise AutopilotError("Sample targets are red or green; blue is an obstacle.")
+    async def mission(self, color, avoid=True):
+        """Find the sample, stop about 10 cm away, and hand over to the pilot for pickup and return."""
+        if color not in NAMES:
+            raise AutopilotError("Choose the ruby or the emerald. Blue is an obstacle.")
         await self._led(RED)
-        await self.go_to(color, avoid=avoid)
+        await self.find(color)
         await self._led(GREEN)
-        self.report("awaiting_pickup", f"Stopped about 10 cm from {color}. Pick up the material by hand, then bring it back to home base and confirm completion.")
+        self.report("manual_pickup", f"Stopped about 10 cm from the {NAMES[color]}. Drive up, squeeze to grab it, "
+                                     "drive it home, then press Delivered.")
         return True
-
-    async def return_to_base(self, avoid: bool = True) -> bool:
-        """Reacquire the home flag, stop at the wall, and reset the LEDs to red."""
-        # Reacquire the actual flag from the current heading; no blind 180-degree assumption.
-        await self.go_to("home", avoid=avoid)
-        await self._led(RED)
-        self.report("home_arrived", "Stopped at the black home flag. Mission complete; LEDs red.")
-        return True
-
-    async def mission(self, color: str, avoid: bool = True, pause_s: float = 3.0) -> bool:
-        """Reach the selected material and stay stopped for human pickup and return.
-
-        ``pause_s`` is accepted for older callers; there is no timed automatic departure.
-        """
-        return await self.collect(color, avoid=avoid)
