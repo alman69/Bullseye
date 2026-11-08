@@ -155,6 +155,34 @@ class PlannerTests(unittest.TestCase):
         self.p.state = EXPLORE
         a = self.p.decide(det(), free((0, 0, 0, 0, 0), visible=False), now=0)
         self.assertEqual(a.kind, BACKWARD)
+        a = self.p.decide(det(), free((0, 0, 0, 0, 0), visible=False), now=0)
+        self.assertIn(a.kind, (TURN_LEFT, TURN_RIGHT))      # then turns instead of backing up forever
+
+    def test_explore_never_gives_up_when_timeout_is_zero(self):
+        p = Planner(NavSettings(explore_timeout_s=0), use_distance=False)
+        p.state = EXPLORE
+        p.decide(det(), CLEAR, now=0)
+        a = p.decide(det(), CLEAR, now=10_000)
+        self.assertNotEqual(p.state, GIVE_UP)
+        self.assertNotEqual(a.kind, STOP)
+
+    def test_obstacle_behind_the_target_is_ignored(self):
+        p = Planner(NavSettings(), use_distance=False)
+        p.state = APPROACH
+        behind = free((1, 0.3, 0.3, 0.3, 1))                # floor open up to just past the close ball
+        self.assertNotEqual(p.decide(det(0.0, bottom=0.9), behind, now=0).state, AVOID)
+        self.assertNotEqual(p.state, AVOID)
+        p = Planner(NavSettings(), use_distance=False)
+        p.state = APPROACH
+        between = free((1, 0.05, 0.05, 0.05, 1))           # obstacle closer than the ball
+        p.decide(det(0.0, bottom=0.9), between, now=0)
+        self.assertEqual(p.state, AVOID)
+
+    def test_wall_ahead_turns_toward_open_floor(self):
+        self.p.state = EXPLORE
+        a = self.p.wall_ahead(15, free((1, 1, 0.2, 0.2, 0.2)))
+        self.assertEqual(a.kind, TURN_LEFT)
+        self.assertEqual(a.duration_ms, self.s.avoid_turn_ms)
 
     def test_action_label_and_dict(self):
         a = self.p.decide(det(-0.5), CLEAR, now=0)

@@ -67,6 +67,8 @@ DEFAULTS: dict = {
         "backoff_ms": 300,
         "explore_steps": 3,
         "explore_timeout_s": 120,
+        "explore_forward_ms": 1000,
+        "wall_distance_cm": 25,
         "decision_period_s": 0.5,
         "arrival_mode": "camera",
         "approach_zone_y": 0.08,

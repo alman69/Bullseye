@@ -81,7 +81,9 @@ class NavSettings:
     avoid_max_retries: int = 4
     backoff_ms: int = 300
     explore_steps: int = 3              # forward steps per exploration leg
-    explore_timeout_s: float = 120
+    explore_forward_ms: int = 0         # one exploration forward step (0 = forward_ms)
+    explore_timeout_s: float = 120      # 0 = never give up (the autopilot keeps exploring until STOP)
+    wall_distance_cm: float = 25        # ultrasonic closer than this while exploring/avoiding = wall: turn
     decision_period_s: float = 0.5      # dry run only: how often to decide (approximates move + settle)
     arrival_mode: str = "camera"        # "camera" (stop line) or "ultrasonic" (tall ores)
     approach_zone_y: float = 0.08       # band above the stop line: tiny steps, ultrasonic ignored
@@ -128,6 +130,7 @@ class Planner:
         self.avoid_retries = 0
         self.explore_started: float | None = None
         self.explore_forward = 0
+        self.backed_off = False            # exploring with no floor in view: back off once, then turn
         self.was_at_line = False           # last decision: centered and inside the approach zone
 
     # ------------------------------------------------------------------ helpers
@@ -270,7 +273,7 @@ class Planner:
             self.awaiting_distance = True
             return self._action(READ_DISTANCE, "Target centered and large; verify the distance.")
 
-        if free is not None and free.center_blocked:
+        if free is not None and free.center_blocked and not self._clear_to_target(det, free):
             return self._start_avoid(free, "Floor ahead is blocked by something that is not the target")
 
         if not centered:
@@ -285,6 +288,34 @@ class Planner:
         self.forward_since_check += 1
         ms, note = self._forward_step(det)
         return self._move(FORWARD, ms, "Target centered; path clear." + note)
+
+    def _clear_to_target(self, det, free) -> bool:
+        """True when the floor in the rover's path is open all the way to the target's bottom edge.
+
+        Something behind the target (e.g. a yellow sheet just past the ball) blocks the floor
+        *beyond* the target, which doesn't matter: only obstacles between the rover and the target do.
+        """
+        bottom = self._bottom(det)
+        if bottom is None or not free.frame_height:
+            return False
+        roi_top = free.roi_top_px / free.frame_height
+        if roi_top >= 1:
+            return False
+        reach = (1.0 - bottom) / (1.0 - roi_top)     # target's bottom edge as a floor height (0 = image bottom)
+        return all(free.heights[i] >= reach - 0.05 for i in free.corridor)
+
+    def wall_ahead(self, distance_cm: float, free) -> Action:
+        """The ultrasonic sees a wall right ahead of a planned forward step: turn toward open floor instead."""
+        left, right = free.side_space() if free is not None else (0.0, 0.0)
+        if abs(left - right) < 0.05:
+            side = self.search_dir
+        else:
+            side = TURN_LEFT if left > right else TURN_RIGHT
+        if self.state == AVOID:
+            self.avoid_queue = []
+            self._enter(SEARCH)
+        return self._move(side, self.s.avoid_turn_ms,
+                          f"Ultrasonic: wall {distance_cm:.0f} cm ahead. Turning toward open floor.")
 
     def _start_avoid(self, free, reason: str, backoff: bool = False) -> Action:
         left, right = free.side_space() if free is not None else (0.0, 0.0)
@@ -331,14 +362,18 @@ class Planner:
     def _explore(self, free, now) -> Action:
         if self.explore_started is None:
             self.explore_started = now
-        if now - self.explore_started > self.s.explore_timeout_s:
+        if self.s.explore_timeout_s > 0 and now - self.explore_started > self.s.explore_timeout_s:
             self._enter(GIVE_UP)
             return self._action(STOP, "Explored too long without finding the target. Ask the pilot.")
         if free is None or not free.floor_visible or max(free.heights) < 0.05:
-            return self._move(BACKWARD, self.s.backoff_ms, "No open floor in view. Backing off.")
+            if not self.backed_off:
+                self.backed_off = True
+                return self._move(BACKWARD, self.s.backoff_ms, "No open floor in view. Backing off.")
+            return self._move(self.search_dir, self.s.avoid_turn_ms, "Still no open floor in view. Turning to look for some.")
+        self.backed_off = False
         if not free.center_blocked:
             self.explore_forward += 1
-            action = self._move(FORWARD, self.s.forward_ms, "Exploring toward open floor.")
+            action = self._move(FORWARD, self.s.explore_forward_ms or self.s.forward_ms, "Exploring toward open floor.")
             if self.explore_forward >= self.s.explore_steps:
                 self._enter(SEARCH)
             return action

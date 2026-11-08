@@ -17,7 +17,7 @@ export function AutopilotPanel({
   act: (type: string, payload?: Record<string, unknown>) => Promise<boolean>;
 }) {
   const [color, setColor] = useState<(typeof ORES)[number]>("red");
-  const [avoid, setAvoid] = useState(false);
+  const [avoid, setAvoid] = useState(true); // on by default: go around yellow obstacles
   const bench = state?.bench;
   const auto = bench?.auto;
   const token = bench?.arm_token;
@@ -31,7 +31,7 @@ export function AutopilotPanel({
       <div className="vision-body">
         <p className="vision-help">
           1) Pick the mineral and press <b>Go</b>: the rover drives to it and stops. 2) Pick it up by hand. 3) Press{" "}
-          <b>Return to base</b>: it turns 180° and drives to the black flag. STOP cancels at any time.
+          <b>Return to base</b>: it turns 180° and drives to the black flag. If it can't see the target it keeps exploring open floor until it finds it. STOP cancels at any time.
         </p>
         <div className="vision-targets" role="group" aria-label="Mineral">
           {ORES.map((c) => (

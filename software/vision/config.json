@@ -71,7 +71,9 @@
         "500": 20.9,
         "1000": 49.0
       }
-    }
+    },
+    "explore_forward_ms": 1000,
+    "wall_distance_cm": 25
   },
   "ground": {
     "points": [],

@@ -14,7 +14,7 @@ it("sends go-to and return-to-base with the current arm token", () => {
   const act = vi.fn().mockResolvedValue(true);
   render(<AutopilotPanel state={state} canStep act={act} />);
   fireEvent.click(screen.getByRole("button", { name: "blue" }));
-  fireEvent.click(screen.getByRole("button", { name: /Avoid obstacles: off/ }));
+  expect(screen.getByRole("button", { name: /Avoid obstacles: on/ })).toBeTruthy(); // on by default
   fireEvent.click(screen.getByRole("button", { name: /Go to blue/ }));
   expect(act).toHaveBeenCalledWith("auto_goto", { color: "blue", avoid: true, arm_token: "tok" });
   fireEvent.click(screen.getByRole("button", { name: /Return to base/ }));

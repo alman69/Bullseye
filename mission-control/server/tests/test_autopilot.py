@@ -37,9 +37,9 @@ class World:
 
     connected, status, error, distance_cm, heartbeats, last_stop_acknowledged = True, "ready", None, None, 0, True
 
-    def __init__(self, vision, block_x=200.0, size=60.0, visible=True):
+    def __init__(self, vision, block_x=200.0, size=60.0, visible=True, wall_cm=None):
         self.vision, self.x, self.size, self.bottom, self.visible = vision, block_x, size, 420.0, visible
-        self.steps, self.seq = [], 0
+        self.steps, self.seq, self.wall_cm = [], 0, wall_cm
         self.show()
 
     async def drive(self, coro):
@@ -72,6 +72,10 @@ class World:
     async def stop(self):
         return True
 
+    async def refresh_distance(self, timeout=2):
+        self.distance_cm = self.wall_cm
+        return True
+
 
 def test_drives_to_the_color_and_arrives(vision):
     world = World(vision)
@@ -87,11 +91,19 @@ def test_turn_around_uses_measured_steps(vision):
     assert abs(sum(table[ms] for ms in plan) - 180) < 15           # within one small step of 180 degrees
 
 
-def test_gives_up_cleanly_when_the_target_is_not_in_view(vision):
-    world = World(vision, visible=False)
+def test_never_gives_up_and_explores_open_floor(vision):
+    world = World(vision, visible=False)                          # target hidden (e.g. behind an obstacle)
+    with pytest.raises(AutopilotError, match="Test step limit"):  # only the test's step cap ends it
+        asyncio.run(world.drive(Autopilot(world, vision).go_to("red", max_steps=25)))
+    assert world.steps[0][0] in ("left", "right")                  # a full search spin first ...
+    assert any(d == "forward" for d, _ in world.steps)            # ... then drives into open floor
+
+
+def test_wall_ahead_turns_instead_of_driving(vision):
+    world = World(vision, visible=False, wall_cm=12)              # ultrasonic: wall 12 cm ahead
     with pytest.raises(AutopilotError):
-        asyncio.run(world.drive(Autopilot(world, vision).go_to("red")))
-    assert len(world.steps) <= 9 and all(d in ("left", "right") for d, _ in world.steps)
+        asyncio.run(world.drive(Autopilot(world, vision).go_to("red", max_steps=25)))
+    assert not any(d == "forward" for d, _ in world.steps)
 
 
 def test_bench_requires_enabled_controls(vision):

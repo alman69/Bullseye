@@ -8,8 +8,14 @@ Deliberately simple for the hackathon demo:
   * After each step it waits for a camera frame taken after the move ended, then asks the
     vision planner (the same one the dashboard shows as DRY RUN) for the next step.
   * Obstacle avoidance is optional: with avoid=True the planner's camera floor check can
-    steer around things that aren't floor or the target; with avoid=False it drives at the target.
+    steer around things that aren't floor or the target (yellow is always an obstacle); with
+    avoid=False it drives at the target.
+  * It never gives up: when a full spin doesn't find the target (e.g. it's hidden behind an
+    obstacle), it drives toward open floor and spins again, until it finds it or STOP is pressed.
+    Before each exploring/avoiding forward step it reads the ultrasonic sensor; a wall closer
+    than `wall_distance_cm` turns it toward open floor instead.
   * STOP on /bench cancels the task immediately; the step in progress still ends with a STOP.
+    It only stops on its own for a fault: no fresh camera frames.
 """
 import asyncio
 import time
@@ -31,6 +37,7 @@ class Autopilot:
         pipeline = self.vision.v.pipeline
         cfg = self.vision.cfg
         settings = pipeline.NavSettings.from_dict(cfg["navigation"])
+        settings.explore_timeout_s = 0          # never give up: keep exploring until found or STOP
         return pipeline.Planner(settings, use_distance=False, stop_line_y=cfg["ground"].get("stop_line_y"))
 
     def _seq(self) -> int:
@@ -52,27 +59,40 @@ class Autopilot:
         await self.bridge.pulse(direction, max(1, min(100, int(pwm))), max(50, min(1000, int(duration_ms))))
 
     # ------------------------------------------------------------ behaviors
-    async def go_to(self, color: str, avoid: bool = False, max_steps: int = 60, timeout_s: float = 150) -> bool:
+    async def _wall_distance(self):
+        """Fresh ultrasonic reading in cm, or None if unknown (no echo or sensor unavailable)."""
+        refresh = getattr(self.bridge, "refresh_distance", None)
+        if refresh is None or not await refresh():
+            return None
+        return self.bridge.distance_cm
+
+    async def go_to(self, color: str, avoid: bool = False, max_steps: int | None = None) -> bool:
+        """Drive to `color` until it arrives. Never gives up; max_steps is only for tests."""
         self.vision.set_target(color)
         planner = self._planner()
         seq = self._seq()
-        started = time.monotonic()
-        for _ in range(max_steps):
-            if time.monotonic() - started > timeout_s:
-                raise AutopilotError(f"Timed out driving to {color}.")
+        steps = 0
+        while max_steps is None or steps < max_steps:
+            steps += 1
             det, free = await self._fresh_view(seq)
-            action = planner.decide(det, free if avoid else None, None, camera_ok=True)
-            self.report("running", f"{color}: {planner.state} → {action.label()}")
+            # The floor check always guards exploring (so it never drives into a wall); while
+            # approaching a visible target it is only used when obstacle avoidance is on.
+            use_floor = avoid or not (det is not None and det.detected)
+            action = planner.decide(det, free if use_floor else None, None, camera_ok=True)
+            if action.kind == "forward" and action.state in ("EXPLORE", "AVOID"):
+                distance = await self._wall_distance()
+                limit = planner.s.wall_distance_cm
+                if distance is not None and 0 < distance < limit:
+                    action = planner.wall_ahead(distance, free)
+            self.report("running", f"{color}: {action.state} → {action.label()}")
             if action.kind == "arrived":
                 self.report("arrived", f"Arrived at {color}. {action.reason}")
                 return True
-            if planner.state in ("EXPLORE", "GIVE_UP"):
-                raise AutopilotError(f"Lost the {color} target after a full search turn. Point the rover at it and retry.")
             seq = self._seq()
             if action.kind in MOVE_TO_DIRECTION:
                 await self._step(action.kind, action.pwm, action.duration_ms)
                 seq = self._seq()
-        raise AutopilotError(f"Too many steps without reaching {color}.")
+        raise AutopilotError(f"Test step limit reached without reaching {color}.")
 
     def turn_plan(self, degrees: float = 180.0) -> list:
         """Timed turn steps (ms) that add up to about `degrees`, from the measured step table."""
