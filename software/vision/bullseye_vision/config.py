@@ -10,7 +10,9 @@ import os
 import tempfile
 from pathlib import Path
 
-DEFAULT_CONFIG_PATH = Path(__file__).with_name("config.json")
+# The arena settings live next to the package (software/vision/config.json), shared by
+# the standalone app and Mission Control.
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
 
 DEFAULTS: dict = {
     "camera": {

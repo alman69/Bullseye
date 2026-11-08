@@ -11,8 +11,8 @@ import cv2
 import numpy as np
 
 import main
-from config import load_config
-from detector import ColorDetector
+from bullseye_vision.config import load_config
+from bullseye_vision.detector import ColorDetector
 
 
 class MainHelperTests(unittest.TestCase):

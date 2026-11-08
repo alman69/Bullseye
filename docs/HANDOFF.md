@@ -1,8 +1,8 @@
 # Bullseye team handoff (for teammates and their AI assistants)
 
-Snapshot written **2026-11-07** by the vision owner (Alex). It describes the project state at
-`main` = `f65d3b0` plus the open vision PR. Things change fast during the hackathon:
-**check `git log` and open PRs before trusting any status below.**
+Snapshot updated **2026-11-08**. It describes `main` after PRs #1–#3 were merged, plus the open
+vision-in-Mission-Control PR. Things change fast during the hackathon: **check `git log` and open
+PRs before trusting any status below.**
 
 ## Ready-to-paste prompt for your AI assistant
 
@@ -37,7 +37,10 @@ Snapshot written **2026-11-07** by the vision owner (Alex). It describes the pro
 6. It returns to its home base (manual assistance allowed).
 
 **Hardware:** Arduino UNO R3, ESP32-WROVER camera (Wi-Fi access point), TB6612 motor driver,
-MPU6050, ultrasonic sensor and camera on one pan servo, and RGB LEDs.
+MPU6050, ultrasonic sensor and camera on one pan servo, and RGB LEDs. A separate
+**ESP32-S3 touchscreen** shows telemetry and a pixel face. The Mac feeds it over BLE with the
+rover controller's cached ultrasonic reading. It sends no rover commands
+(`docs/BLE_DISPLAY.md`, `firmware/esp32-display/`).
 
 **Architecture:** the laptop does all vision and decision-making. The ESP32 streams video and
 relays JSON commands to the UNO over UART. The UNO runs the motors and sensors. Firmware is the
@@ -48,18 +51,21 @@ obstacles. A floodlight will be added later. See the palette in §8.
 
 ## 2. Who owns what
 
-| Area | Owner | Where |
+The team co-owns everything: anyone (and their assistant) may change any part, as long as they
+use a branch and a PR. The original authors, for context:
+
+| Area | Started by | Where |
 |---|---|---|
-| Computer vision / color detection | Alex (GitHub `alman69` repo owner) | `software/vision/` on branch `feature/vision-phase1`, PR #1 |
-| Mission Control website + server, rover command bridge, manual driving | faiyaz | `mission-control/`, `docs/MISSION_CONTROL.md`, `docs/ELEGOO_CONNECTION.md` (on `main`) |
-| Third teammate | not recorded here | `docs/ELEGOO_CONNECTION.md` mentions planned "teammate's firmware work" for an independent UNO motion timeout. **Confirm who owns that and whether flashing is allowed** |
+| Computer vision, floor check, planner, vision-in-Mission-Control | Alex (GitHub `alman69`, repo owner) | `software/vision/`, `mission-control/server/bullseye/vision.py`, `mission-control/web/components/vision-*` |
+| Mission Control website + server, rover command bridge, manual driving, BLE display | faiyaz | `mission-control/`, `firmware/esp32-display/`, `docs/MISSION_CONTROL.md`, `docs/ELEGOO_CONNECTION.md`, `docs/BLE_DISPLAY.md` |
+| UNO firmware motion timeout | not recorded | `docs/ELEGOO_CONNECTION.md` mentions planned firmware work. **Confirm who owns it and whether flashing is allowed** |
 
 ## 3. Repository and branch status
 
 | Ref | Contents |
 |---|---|
-| `main` (`f65d3b0`) | Vendor firmware + docs (`5e7db7d`), then three commits by faiyaz: Mission Control dashboard, simulator and camera relay; real-rover manual control demo (`/bench`); live ultrasonic polling |
-| `feature/vision-phase1` → [PR #1](https://github.com/alman69/Bullseye/pull/1) | Laptop vision app. **Not merged.** It conflicts with `main` in `.gitignore` only (both sides added Python ignores); resolve by keeping both blocks without duplicates |
+| `main` | Vendor firmware and docs; Mission Control (dashboard, simulator, camera relay, `/bench` manual control, ultrasonic polling); **merged** PR #1 (laptop vision app), PR #2 (navigation dry run + color classifier + stop line), PR #3 (BLE display) |
+| `feature/vision-mission-control` (PR open) | Vision runs **inside Mission Control** (overlay, panel, browser calibration). See §7 |
 
 The old repository (`alman69/RoFinder`) was deleted, so ignore any reference to it or to its
 "PR #2".
@@ -104,7 +110,7 @@ UNO's replies back (`firmware/arduino-uno/.../ApplicationFunctionSet_xxx0.cpp` a
 - Alex: live camera at **~15–16 FPS at 800×600**, color detection accepted, and auto-reconnect
   after two unprompted Wi-Fi stalls. Details are in `software/vision/README.md` §9.
 
-## 5. Vision subsystem (`software/vision/`, branch `feature/vision-phase1`)
+## 5. Vision subsystem (`software/vision/`; also runs inside Mission Control, §7)
 
 **Stack:** Python + OpenCV + NumPy, using HSV thresholds (no ML). Verified on macOS with Python
 3.9.6, opencv-python 4.10.0.84 and numpy 2.0.2. `requirements.txt` has markers that pick numpy ≥ 2.1
@@ -145,7 +151,7 @@ on Python ≥ 3.13.
 - Brown cardboard's hue (about 10–20) sits between red and yellow. Raise **S low** if cardboard
   triggers false detections.
 
-## 6. Mission Control (`mission-control/`, by faiyaz; full details in `docs/MISSION_CONTROL.md`)
+## 6. Mission Control (`mission-control/`; full details in `docs/MISSION_CONTROL.md`)
 
 - **Server:** FastAPI on **Python 3.13+**. The web app uses React/TypeScript/Vite on **Node
   22.12+**.
@@ -157,7 +163,7 @@ on Python ≥ 3.13.
   idle → searching → approaching → awaiting_confirmation → collecting → collected → returning →
   completed, plus a latched STOP. There is one pilot seat, and anyone can press STOP. A frozen
   review snapshot is shown for confirmation.
-  - **Colors are red/green/blue only. Yellow still needs adding here and in `web/lib/protocol.ts`.**
+  - Colors: red, green, blue and **yellow** (yellow added with the vision integration).
 - **`adapters.py`:** the `RoverAdapter` protocol is **the integration point for navigation and
   vision**.
   - Methods: `search(color)` yields `"approaching"` then `"candidate"`; `collect(color)` (LED
@@ -170,54 +176,59 @@ on Python ≥ 3.13.
     350 ms lease renewed every 100 ms.
   - STOP: N100 (bypasses the queue).
   - Ultrasonic: N21 at about 2 Hz when idle. Driving pauses for each reading.
-- **Tests:**
-  - Web: `npm test` (37 passing) and `npm run build` both succeeded on `f65d3b0` on Alex's Mac
-    (Node 24).
-  - Server: `pytest`. Not re-run by Alex, because that Mac has no Python 3.13.
+- **Tests (vision integration branch, Alex's Mac, Python 3.13.18 / Node 24):**
+  - server `pytest`: 127 pass
+  - web `npm test`: 45 pass, and the build succeeds
+  - `software/vision` unittest: 92 pass
 
-## 7. Single-owner rule and the planned integration
+## 7. Single-owner rule: vision now runs inside Mission Control
 
-Because the ESP32 accepts only one client of each kind, the **Mission Control server process
-should own both connections**:
+The ESP32 accepts only one client of each kind, so the **Mission Control server process owns
+both connections**:
 - the camera, through `CameraHub`
-- commands, through `FactoryBridge`
+- commands, through `FactoryBridge` on `/bench`
 
-Navigation and vision should run **inside that process**:
-- decode `CameraHub.latest` with `cv2.imdecode`
-- call `ColorDetector.detect`
-- drive through the bridge
+**Vision runs inside that process** (`bullseye/vision.py`, PR "vision in Mission Control"):
+- It decodes the relay's newest frames in a worker thread and runs the shared `bullseye_vision`
+  package (detector, floor check, planner).
+- It streams results on `/ws/vision` and adds `state.vision` to the state.
+- The dashboard draws the overlay and offers calibration. Calibration is saved in
+  `software/vision/`.
 
-The standalone vision app (`software/vision/main.py`) is for calibration and testing **when the
-server is not running**. Implementing a real `RoverAdapter` that does this is the next big step.
-It touches faiyaz's code, so agree on it first.
+The standalone `software/vision/main.py` is for offline replays and logging **when the server
+isn't holding the camera**.
 
-Integration to-dos:
-- Add `opencv-python` and `numpy` to `mission-control/server/pyproject.toml`.
-- Add yellow to the server and web colors.
-- Either make the LED color survive STOP (N100 clears it), or re-send N8 after each stop.
+**Still to do:**
+- **A real `RoverAdapter`:** autonomous driving that executes the planner's moves through the
+  bridge (N2 timed steps; servo and LED commands only while stopped). The planner is a dry run
+  today.
+- **The LED color after STOP:** N100 clears it. Either keep it from clearing or re-send N8 after
+  each stop.
 
 ## 8. Decisions and proposals (status in brackets)
 
 - **[Decided]** Color detection is accepted for now (red and yellow tested; real red rock still
   pending).
 - **[Decided]** Walls stay unpainted cardboard; the floor is white.
-- **[Proposed, not built]** Obstacle avoidance uses **the camera first, with the ultrasonic
-  sensor as a safety check**:
+- **[Built as a dry run, PR #2 + vision-in-MC]** Obstacle avoidance uses **the camera first,
+  with the ultrasonic sensor as a safety check**:
   - **Floor detection:** low-saturation pixels count as white floor. In 5 vertical strips across
     the bottom half of the image, measure how far up the floor continues. A short strip means
     something is close in that direction (cardboard, boxes, the non-target rock), so steer to the
     strip with the most floor. The target rock's pixels are excluded.
-  - **Ultrasonic:** every few moves, stop and read it. Under about 20 cm with the target not
-    centered means an obstacle: back up and turn. Under about 20 cm with the target centered and
-    large means arrival: stop and request confirmation.
+  - **Ultrasonic:** a wall and tall-obstacle backstop only. Every few moves, stop and read it;
+    under about 10 cm and not the target means back up and turn. Small mineral blocks sit below the
+    beam, so **arrival is camera-only**: the block's bottom edge reaches the calibrated STOP LINE,
+    or it slips out of the bottom of the view while centered at the line.
   - **Driving:** reactive steering with N2 moves (turn a little toward the target, or step
     forward). No map or path planning, since there are no wheel encoders.
   - **Arena rules:** no white or very light obstacles, and no tape on the floor.
-- **[Proposed, not built]** Sample-based color calibration for the painted blocks:
-  - drag a box over each block, several times at different distances and lighting
-  - the app computes the HSV ranges, handling red's wrap-around automatically
-  - it prints an overlap table against the other colors, the floor and the cardboard
-  - after calibrating, consider locking the camera's white balance via `/control`
+- **[Built]** Sample-based color calibration (a per-pixel classifier with floor-referenced
+  white balance):
+  - drag boxes over each block, the floor, the cardboard and the obstacles (in the dashboard's
+    Calibration panel, or `main.py` key `k`)
+  - fit, then check the overlap table
+  - **Needs the live arena session** (and a redo under the floodlight).
 - **[Open]** Who does the UNO firmware motion timeout, and is flashing allowed?
 - **[Open]** Which laptop runs the demo? It needs Python 3.13 and Node 22+ for Mission Control,
   plus the vision dependencies, installed **before** joining the rover's internet-less Wi-Fi.

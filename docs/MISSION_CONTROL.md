@@ -126,7 +126,7 @@ This application does not reconfigure camera firmware or laptop routing.
 ```text
 Remote browser ↔ HTTPS/WebSockets ↔ Cloudflare
                                       ↕ Ethernet / Internet
-                         Laptop: FastAPI and future OpenCV
+                         Laptop: FastAPI + OpenCV vision
                                       ↕ Wi-Fi
                                   ESP32 ↔ UNO
 ```
@@ -166,7 +166,8 @@ guarantee. Physical network and rover verification remain a separate milestone.
 ## API and teammate integration contract
 
 All URLs are relative to the same origin. Video uses binary JPEG messages on
-`/ws/video`. There is no OpenCV or autonomous hardware navigation yet. The separate
+`/ws/video`. Vision (OpenCV) runs inside the server (see "Vision" below), but there is
+no autonomous hardware navigation yet: the planner is a dry run. The separate
 `/bench` controller implements real manual transport; the mission API below keeps
 using the disabled hardware stub until navigation integration is ready.
 
@@ -247,6 +248,54 @@ with the normal 2.5-second acknowledgement timeout. Missing replies show a timeo
 and disconnection clears the old measurement. They do not replace pilot heartbeats
 and do not keep a pilot lease alive. This RTT includes the public tunnel when used;
 it does not measure laptop-to-ESP32 or ESP32-to-UNO latency.
+
+## Vision (built in)
+
+The server runs the color detector, the white-floor obstacle check and the navigation
+planner on the camera relay's frames. There is no separate vision app to start and no
+second camera connection: the relay stays the only client of the ESP32 stream.
+
+- **Code:** `bullseye/vision.py` (service) imports the shared `bullseye_vision` package from
+  `software/vision/`. It processes the newest frame in a worker thread (≈10 FPS, a few ms per
+  frame), so video delivery never waits.
+- **Calibration data** is read and written in `software/vision/` (`config.json`,
+  `color_model.json`, `captures/samples.npz`). That is the same calibration the standalone
+  `software/vision/main.py` uses. `BULLSEYE_VISION_DIR` points it elsewhere;
+  `BULLSEYE_VISION=0` turns vision off.
+- **Simulation:** vision runs on the simulator's red, green, blue and yellow rocks, so
+  everything below can be tried without the rover. The simulated ground isn't a white floor,
+  so its floor strips show as blocked.
+- **The planner is a DRY RUN.** It reports the move it would make ("AVOID → TURN LEFT 300 ms").
+  Nothing in vision sends a rover command.
+
+**Dashboard** (`/` and `/bench`):
+
+| Part | What it shows / does |
+| --- | --- |
+| **Camera overlay** | The target box with `~cm` once ground-calibrated, other same-color blobs, the center line and CENTER band, floor strips (green clear, red blocked), the horizon, approach zone and magenta STOP LINE, and the dry-run move with an arrow |
+| **Vision panel** | Detector mode, FPS and ms; DETECTED or NOT IN VIEW, direction, error, `~cm`; planner state, next move and reason. Toggles for the overlay, the floor strips and a mask preview (target, then floor, then off). Snapshot, Reset planner, Calibrate. On `/bench` it also picks the vision target |
+| **Calibration panel** | Five tabs: **Colors** (pick a class, drag boxes on the video, fit, overlap table, detector mode), **Stop line** (capture the block at 10/15/20/30 cm, then fit), **Field of view** (centered and side captures), **Steps** (`/bench` measurements in cm and degrees), **Tuning** (sliders) |
+
+Selecting a mission target (now **red, green, blue or yellow**) also sets the vision target.
+Changing calibration requires the pilot seat; everyone can watch.
+
+**API additions:**
+- `/ws/vision` (JSON per processed frame; normalized boxes and lines)
+- `GET /api/vision/state` (the same summary as `state.vision`)
+- `GET /api/vision/mask.jpg?kind=target|floor`
+- control commands, pilot only: `vision_target`, `vision_sample`, `vision_undo`,
+  `vision_clear_samples`, `vision_fit`, `vision_mode`, `vision_ground_capture`,
+  `vision_ground_clear`, `vision_ground_fit`, `vision_ground_reset`, `vision_fov_capture`,
+  `vision_fov_fit`, `vision_steps`, `vision_tune`, `vision_snapshot`, `vision_reset_planner`.
+  They work on `/ws/control` and `/ws/bench`.
+
+**Dependencies:** OpenCV and NumPy are now in `requirements.lock.txt`. After pulling, rerun the
+same install command:
+`.venv/bin/python -m pip install -r requirements.lock.txt -r requirements-ble-macos.lock.txt -e '.[ble,test]'`.
+
+**With the real camera:** run `run-rover-demo.sh` (it relays the ESP32 stream) and open
+`/bench`. The overlay, vision panel and calibration are on that page too. Don't run the
+standalone vision app at the same time: the camera serves one client.
 
 ## Validation
 

@@ -6,9 +6,9 @@ import unittest
 import cv2
 import numpy as np
 
-from config import load_config
-from detector import ColorDetector
-from freespace import FloorSettings, analyze_floor
+from bullseye_vision.config import load_config
+from bullseye_vision.detector import ColorDetector
+from bullseye_vision.freespace import FloorSettings, analyze_floor
 
 H, W = 600, 800
 FLOOR = (235, 235, 235)        # matte white floor (BGR)

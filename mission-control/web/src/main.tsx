@@ -5,6 +5,7 @@ import "./mission-updates.css";
 import App from "./App.tsx";
 import RoverDemo from "./RoverDemo.tsx";
 import "./rover-demo.css";
+import "./vision.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

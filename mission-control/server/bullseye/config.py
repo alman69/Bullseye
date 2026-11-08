@@ -18,6 +18,10 @@ class Settings:
     rover_host: str = "192.168.4.1"
     rover_port: int = 100
     web_dist: Path = Path(__file__).resolve().parents[2] / "web" / "dist"
+    # Vision runs inside this server on the camera relay's frames (bullseye/vision.py).
+    # Off by default for tests; from_env() turns it on unless BULLSEYE_VISION=0.
+    vision_enabled: bool = False
+    vision_dir: Path = Path(__file__).resolve().parents[3] / "software" / "vision"
 
     def __post_init__(self):
         if self.mode not in {"simulation", "hardware"}:
@@ -39,4 +43,6 @@ class Settings:
             bench_enabled=bench,
             rover_host=os.getenv("ROVER_HOST", "192.168.4.1"),
             rover_port=int(os.getenv("ROVER_PORT", "100")),
+            vision_enabled=os.getenv("BULLSEYE_VISION", "1") == "1",
+            vision_dir=Path(os.getenv("BULLSEYE_VISION_DIR", str(cls.vision_dir))),
         )

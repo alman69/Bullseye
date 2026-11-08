@@ -20,8 +20,8 @@ import json
 import math
 import sys
 
-from config import DEFAULT_CONFIG_PATH, load_config, save_config
-from ground import GroundModel
+from bullseye_vision.config import DEFAULT_CONFIG_PATH, load_config, save_config
+from bullseye_vision.ground import GroundModel
 
 
 def read_detection(path: str) -> dict:

@@ -38,6 +38,9 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { CameraView } from "@/components/camera-view";
+import { VisionCalibration } from "@/components/vision-calibration";
+import { VisionPanel } from "@/components/vision-panel";
+import { useVisionUi } from "@/hooks/use-vision-ui";
 import { ManualControls } from "@/components/manual-controls";
 import { ConnectionsDrawer } from "@/components/connections-drawer";
 import { MobileTabs, type MobileView } from "@/components/mobile-tabs";
@@ -66,7 +69,7 @@ const STAGE_INDEX: Record<Phase, number> = {
   completed: 5,
   stopped: -1,
 };
-const SAMPLE_COLORS: SampleColor[] = ["red", "green", "blue"];
+const SAMPLE_COLORS: SampleColor[] = ["red", "green", "blue", "yellow"];
 
 function MissionClock({ state }: { state: MissionState | null }) {
   const [now, setNow] = useState(Date.now());
@@ -288,6 +291,7 @@ export default function App() {
     clearError,
   } = useMission();
   const [busy, setBusy] = useState(false);
+  const visionUi = useVisionUi(act);
   const [guideOpen, setGuideOpen] = useState(false);
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [mobileView, setMobileView] = useState<MobileView>("mission");
@@ -575,7 +579,16 @@ export default function App() {
                 state={state}
                 connected={connected}
                 onStop={() => void stop()}
+                vision={state?.vision?.available ? visionUi.overlay : undefined}
               />
+              {visionUi.calibrating && (
+                <VisionCalibration
+                  vision={state?.vision}
+                  ui={visionUi}
+                  canAct={connected && isPilot}
+                  act={act}
+                />
+              )}
               {isMobile &&
                 mobileView === "pilot" &&
                 phase === "awaiting_confirmation" && (
@@ -739,6 +752,12 @@ export default function App() {
                   </p>
                 </div>
               </Card>
+              <VisionPanel
+                vision={state?.vision}
+                ui={visionUi}
+                canAct={connected && isPilot}
+                act={act}
+              />
               <div className={`pilot-strip ${isPilot ? "pilot-active" : ""}`}>
                 <span className="pilot-avatar">
                   <MousePointer2 size={17} />

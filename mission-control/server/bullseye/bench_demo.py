@@ -227,6 +227,7 @@ class BenchControl:
         self.events = deque(maxlen=100)
         self.subscribers = set()
         self.stop_jobs = set()
+        self.vision = None   # VisionService, attached by create_app when enabled
         self.log("Rover control online. Connect the bridge, then enable controls.")
 
     def log(self, message, level="info"):
@@ -247,6 +248,7 @@ class BenchControl:
             "pilot_id": self.pilot, "led_color": None, "motion": {"linear": 0, "angular": 0},
             "distance_cm": self.bridge.distance_cm, "last_stop_acknowledged": self.bridge.last_stop_acknowledged,
             "events": list(self.events),
+            "vision": self.vision.summary() if self.vision else None,
             "bench": {"enabled": True, "status": self.bridge.status, "error": self.bridge.error,
                       "armed": self.armed, "arm_token": self.arm_token, "busy": self.operation is not None,
                       "direction": self.direction, "stop_pending": self.stop_pending,

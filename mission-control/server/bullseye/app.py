@@ -15,6 +15,7 @@ from .bench_demo import BenchControl
 from .camera import CameraHub
 from .config import Settings
 from .mission import CommandError, MissionControl
+from .vision import VisionService
 
 
 class Command(BaseModel):
@@ -30,10 +31,16 @@ def create_app(settings: Settings | None = None, *, bench_bridge=None):
     adapter = Simulator(settings) if settings.mode == "simulation" else HardwareStub()
     control = MissionControl(settings, adapter, camera)
     bench = BenchControl(settings, camera, bench_bridge) if settings.bench_enabled else None
+    vision = VisionService(settings, camera) if settings.vision_enabled else None
+    control.vision = vision
+    if bench:
+        bench.vision = vision
 
     @asynccontextmanager
     async def lifespan(app):
         await camera.start()
+        if vision:
+            await vision.start()
         await control.start()
         if bench:
             await bench.start()
@@ -41,11 +48,14 @@ def create_app(settings: Settings | None = None, *, bench_bridge=None):
         if bench:
             await bench.close()
         await control.close()
+        if vision:
+            await vision.close()
         await camera.close()
 
     app = FastAPI(title="Bullseye Mission Control", lifespan=lifespan)
     app.state.control, app.state.camera = control, camera
     app.state.bench = bench
+    app.state.vision = vision
 
     @app.get("/api/state")
     async def state():
@@ -118,7 +128,16 @@ def create_app(settings: Settings | None = None, *, bench_bridge=None):
                         recent_ids.append(command.id)
                         if len(recent_ids) > 512:
                             seen_ids.discard(recent_ids.pop(0))
-                    await controller.command(session_id, command.type, command.payload)
+                    if command.type.startswith("vision_"):
+                        # Calibration changes affect what the rover sees: pilot only.
+                        if vision is None:
+                            raise CommandError("Vision is not running on this server.")
+                        if controller.pilot != session_id:
+                            raise CommandError("Claim pilot controls first.")
+                        await vision.command(command.type, command.payload)
+                        controller.publish()
+                    else:
+                        await controller.command(session_id, command.type, command.payload)
                     await send({"type": "ack", "id": command.id, "status": "accepted"})
                 except CommandError as error:
                     await send({"type": "ack", "id": request_id, "status": "rejected", "error": str(error)})
@@ -139,6 +158,52 @@ def create_app(settings: Settings | None = None, *, bench_bridge=None):
                 await controller.disconnect(session_id)
                 with suppress(asyncio.CancelledError):
                     await asyncio.gather(sender, return_exceptions=True)
+
+    @app.get("/api/vision/state")
+    async def vision_state():
+        if vision is None:
+            raise HTTPException(404, "Vision is disabled (BULLSEYE_VISION=0).")
+        return vision.summary()
+
+    @app.get("/api/vision/mask.jpg")
+    async def vision_mask(kind: str = "target"):
+        if vision is None or not vision.available:
+            raise HTTPException(503, "Vision is not available.")
+        if kind not in ("target", "floor"):
+            raise HTTPException(400, "kind must be target or floor")
+        frame = await asyncio.to_thread(vision.mask_jpeg, kind)
+        if frame is None:
+            raise HTTPException(503, "No camera frame yet.")
+        return Response(frame, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    @app.websocket("/ws/vision")
+    async def vision_socket(ws: WebSocket):
+        await ws.accept()
+        if vision is None or not vision.available:
+            await ws.close(code=1011, reason="Vision is not available")
+            return
+        queue = vision.subscribe()
+
+        async def sender():
+            while True:
+                await asyncio.wait_for(ws.send_json(await queue.get()), timeout=2)
+
+        async def receiver():
+            while True:
+                if (await ws.receive())["type"] == "websocket.disconnect":
+                    return
+
+        tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver())]
+        try:
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            for task in tasks:
+                task.cancel()
+            vision.unsubscribe(queue)
+            with suppress(asyncio.CancelledError):
+                await asyncio.gather(*tasks, return_exceptions=True)
 
     @app.websocket("/ws/video")
     async def video_socket(ws: WebSocket):

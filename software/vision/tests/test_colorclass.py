@@ -8,9 +8,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from colorclass import UNKNOWN, ColorModel, WhiteBalance, format_confusion, load_samples, save_samples
-from config import load_config
-from detector import ColorDetector
+from bullseye_vision.colorclass import UNKNOWN, ColorModel, WhiteBalance, format_confusion, load_samples, save_samples
+from bullseye_vision.config import load_config
+from bullseye_vision.detector import ColorDetector
 
 # OpenCV HSV values measured in the arena snapshots.
 MEASURED_HSV = {

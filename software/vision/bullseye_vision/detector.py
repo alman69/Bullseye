@@ -154,11 +154,11 @@ class ColorDetector:
 
     @classmethod
     def from_config(cls, cfg: dict, base_dir=None, mode: str | None = None) -> "ColorDetector":
-        from colorclass import ColorModel
-        from ground import GroundModel
+        from .colorclass import ColorModel
+        from .ground import GroundModel
         cc = cfg.get("classifier", {})
         mode = mode or cc.get("mode", "auto")
-        base = Path(base_dir) if base_dir else Path(__file__).parent
+        base = Path(base_dir) if base_dir else Path(__file__).resolve().parent.parent
         model_path = base / cc.get("model_path", "color_model.json")
         model = None
         if mode == "classifier" or (mode == "auto" and model_path.exists()):
@@ -172,7 +172,7 @@ class ColorDetector:
         return det
 
     def set_model(self, model, cc: dict | None = None) -> None:
-        from colorclass import WhiteBalance
+        from .colorclass import WhiteBalance
         cc = cc or {}
         self.model = model
         self.wb = None
