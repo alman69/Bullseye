@@ -1,6 +1,6 @@
 # Bullseye
 
-A project for UB Hackathon 2026.
+A project for UB 24 Hour Hackathon 2026.
 Demo Video: https://www.youtube.com/watch?v=LU3hfXpCes4&feature=youtu.be
 
 Camera-guided sample missions with a laptop-hosted Mission Control dashboard.
