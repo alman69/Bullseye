@@ -29,3 +29,5 @@ left and right at walls (no second 360). Once found it approaches to about 20 cm
 drive the sample home and press Delivered. See [docs/AUTONOMY_PLAN.md](docs/AUTONOMY_PLAN.md).
 Blue is an obstacle; yellow remains available for calibration. Motion uses timed calibration and
 still needs supervised physical validation; camera size alone never confirms the 20 cm stop.
+
+Demo Video: https://www.youtube.com/watch?v=LU3hfXpCes4&feature=youtu.be
